@@ -1,0 +1,62 @@
+// // This part is for the backend of the project. It contains all the server-side code and logic for handling requests, processing data, and interacting with databases or other services. The backend is responsible for ensuring that the application functions correctly and efficiently, providing the necessary APIs for the frontend to communicate with.
+
+// # Backend Node.js
+
+// This directory contains the backend code for the application, built using Node.js and Express. It handles all server-side logic, including API routes, database interactions, and business logic.
+
+// ## Features
+
+// - RESTful API endpoints for managing salons, clients, appointments, and more.
+// - MongoDB integration for data storage.
+// - CORS configuration to allow communication with the frontend.
+// - Error handling and health check endpoint.
+
+// ## Getting Started
+
+// ### Prerequisites
+
+// - Node.js (version 14 or higher)
+// - MongoDB (local or cloud instance)
+
+// ### Installation
+
+// 1. Clone the repository:
+//    ```bash
+//    git clone https://github.com/your-username/your-repo-name.git        
+//     cd your-repo-name/Backend   
+//     ```
+// 2. Install dependencies:
+//    ```bash
+//    npm install
+//    ```
+// 3. Create a `.env` file in the root of the `Backend` directory and add the following environment variables:
+//    ```
+//    PORT=3001
+//    MONGODB_URI=mongodb://localhost:27017/fid-le-beaut
+//    CORS_ORIGIN=http://localhost:5173
+//    ```
+// 4. Start the server:
+//    ```bash
+//    npm start
+//    ```
+
+// ### API Endpoints
+
+// - `GET /api/health`: Check server health.
+// - `POST /api/salons`: Create a new salon.
+// - `GET /api/salons`: Get all salons.
+// - `POST /api/clients`: Create a new client.
+// - `GET /api/clients`: Get all clients.
+// - `POST /api/rendez-vous`: Create a new appointment.
+// - `GET /api/rendez-vous`: Get all appointments.
+
+// For more details on available endpoints and their usage, refer to the API documentation.
+
+// ## Contributing
+
+// Contributions are welcome! Please fork the repository and create a pull request with your changes.
+
+// ## License
+
+// This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.    
+
