@@ -55,16 +55,21 @@ function buildSessionResponse(user, salon, token) {
 exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
+    
    
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
     }
-
+    const users = await User.find();
+    console.log(users);
     const user = await User.findOne({ email }).select('+password').populate('salon');
-
+    console.log(email, password);
+    console.log(user);
     if (!user) {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
     }
+    
+
 
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
@@ -93,7 +98,7 @@ exports.login = async (req, res, next) => {
     
     const token = user.getSignedJwtToken();
     const salon = user.role === 'admin' ? null : user.salon;
-
+    console.log('Login réussi pour email:', salon ? `${email} (Salon: ${salon.name})` : email);
     res.status(200).json({
       success: true,
       ...buildSessionResponse(user, salon, token),
