@@ -29,7 +29,7 @@ const userSchema = new mongoose.Schema({
 
 // Encrypt password before saving user
 userSchema.pre('save', async function (next) {
-    if (!this.isModified('password')){
+    if (!this.isModified('password')) {
         next();
     }
     const salt = await brcrypt.genSalt(10);

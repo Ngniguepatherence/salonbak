@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Super Administrateur",
+    "email": "admin@beautyflow.com",
+    "password": "$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
+    "role": "admin",
+    "telephone": "+33123456789",
+    "actif": true,
+    "createdAt": {
+      "$date": "2024-04-13T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2024-04-13T00:00:00.000Z"
+    }
+  }
+]

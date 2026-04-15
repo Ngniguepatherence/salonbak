@@ -17,7 +17,7 @@ exports.protect = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).populate('salon', 'name isActive abonnement');
+    const user = await User.findById(decoded.id).populate('salon', 'name isActive abonnement plan limits');
 
     if (!user) {
       return res.status(401).json({ success: false, message: 'Utilisateur introuvable' });
@@ -69,6 +69,57 @@ exports.belongsToSalon = (req, res, next) => {
   }
 
   next();
+};
+
+/**
+ * Vérifie les limites du plan d'abonnement
+ * Usage : checkPlanLimit('clients')
+ */
+exports.checkPlanLimit = (resourceType) => {
+  return async (req, res, next) => {
+    const { getPlan } = require('../config/plans');
+    const Client = require('../models/Client');
+    const User = require('../models/User');
+
+    const salon = req.user.salon;
+    if (!salon) return next();
+
+    const { limits } = salon;
+    let currentLimit = -1;
+    let currentCount = 0;
+    let Model;
+
+    switch (resourceType) {
+      case 'clients':
+        currentLimit = limits?.maxCustomers ?? -1;
+        Model = Client;
+        break;
+      case 'staff':
+        currentLimit = limits?.maxStaff ?? -1;
+        // Le staff sont des Users avec le rôle 'staff' dans ce salon
+        currentCount = await User.countDocuments({ salon: salon._id, role: 'staff' });
+        break;
+    }
+
+    // -1 signifie illimité
+    if (currentLimit === -1) return next();
+
+    // Si on a un modèle, on compte les documents
+    if (Model && resourceType !== 'staff') {
+      currentCount = await Model.countDocuments({ salon: salon._id });
+    }
+
+    if (currentCount >= currentLimit) {
+      return res.status(403).json({
+        success: false,
+        message: `Limite de votre plan atteint (${currentLimit} ${resourceType}). Veuillez passer au plan supérieur pour en ajouter plus.`,
+        limitReached: true,
+        limit: currentLimit
+      });
+    }
+
+    next();
+  };
 };
 
 /**

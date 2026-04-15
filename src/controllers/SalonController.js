@@ -121,7 +121,9 @@ exports.updateRappels = async (req, res, next) => {
 // ─────────────────────────────────────────────
 exports.getAbonnement = async (req, res, next) => {
   try {
-    const salon = await Salon.findById(req.params.salonId).select('abonnement isActive name');
+    const salon = await Salon
+      .findById(req.params.salonId)
+      .select('abonnement isActive name plan limits');
 
     if (!salon) {
       return res.status(404).json({ success: false, message: 'Salon introuvable' });
@@ -133,9 +135,11 @@ exports.getAbonnement = async (req, res, next) => {
       success: true,
       data: {
         ...salon.abonnement.toObject(),
-        active:         salon.isSubscriptionActive(),
+        plan:                salon.plan,           // 'basic' | 'pro' | 'premium'
+        limits:              salon.limits,         // On retourne les limites enregistrées en base
+        active:              salon.isSubscriptionActive(),
         joursRestants,
-        expirationProche: joursRestants <= 10,
+        expirationProche:    joursRestants <= 10,
         expirationImminente: joursRestants <= 5,
       },
     });
@@ -222,6 +226,63 @@ exports.deleteStaff = async (req, res, next) => {
     }
 
     res.status(200).json({ success: true, data: {} });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────
+// POST /api/salons/:salonId/upgrade-request
+// Prévient l'admin
+// ─────────────────────────────────────────────
+exports.upgradeRequest = async (req, res, next) => {
+  try {
+    const { plan: targetPlan } = req.body;
+    const salon = await Salon.findById(req.params.salonId).populate('owner');
+
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable' });
+    }
+
+    // Log pour l'admin (pourrait être un mail ultérieurement)
+    console.log(`[UPGRADE REQUEST] @ ${new Date().toISOString()}`);
+    console.log(`- Salon: ${salon.name}`);
+    console.log(`- Propriétaire: ${salon.owner?.name} (${salon.owner?.email})`);
+    console.log(`- Nouveau Plan souhaité: ${targetPlan}`);
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Demande d\'upgrade reçue. Un conseiller vous contactera par WhatsApp ou par mail.' 
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────
+// PUT /api/salons/:salonId/fidelite
+// Mise à jour explicite de la config fidélité
+// ─────────────────────────────────────────────
+exports.updateConfigFidelite = async (req, res, next) => {
+  try {
+    const { visitesRequises, reductionPourcentage, visitesVIP } = req.body;
+    
+    const update = {};
+    if (visitesRequises !== undefined) update['configFidelite.visitesRequises'] = Number(visitesRequises);
+    if (reductionPourcentage !== undefined) update['configFidelite.reductionPourcentage'] = Number(reductionPourcentage);
+    if (visitesVIP     !== undefined) update['configFidelite.visitesVIP'] = Number(visitesVIP);
+
+    const salon = await Salon.findByIdAndUpdate(
+      req.params.salonId,
+      { $set: update },
+      { new: true, runValidators: true }
+    );
+
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable' });
+    }
+
+    res.status(200).json({ success: true, data: salon });
   } catch (err) {
     next(err);
   }

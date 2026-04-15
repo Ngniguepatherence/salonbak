@@ -25,7 +25,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['owner', 'staff'],
+    enum: ['owner', 'staff', 'admin'],
     default: 'staff',
   },
   // Lien vers le salon — obligatoire sauf pour les admins globaux

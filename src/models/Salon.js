@@ -11,7 +11,7 @@ const abonnementSchema = new mongoose.Schema({
   },
   montant: {
     type: Number,
-    default: 25000, // FCFA
+    default: 25000,
   },
   dureeJours: {
     type: Number,
@@ -165,9 +165,21 @@ const salonSchema = new mongoose.Schema({
     type: abonnementSchema,
     default: () => ({}),
   },
+  plan: {
+    type: String,
+    enum: ['basic', 'pro', 'premium'],
+    default: 'basic',
+  },
   isActive: {
     type: Boolean,
     default: true,
+  },
+  limits: {
+    maxCustomers: { type: Number, default: 300 },
+    maxStaff: { type: Number, default: 2 },
+    maxCampaignsPerMonth: { type: Number, default: 0 },
+    exportEnabled: { type: Boolean, default: false },
+    campaignsEnabled: { type: Boolean, default: false },
   },
 
 }, { timestamps: true });

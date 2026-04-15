@@ -1,16 +1,18 @@
 const express = require('express');
 const router = express.Router({ mergeParams: true }); // pour accès à :salonId depuis les sous-routes
 
-const { protect, authorize, belongsToSalon, requireActiveSubscription } = require('../middleware/auth');
+const { protect, authorize, belongsToSalon, requireActiveSubscription, checkPlanLimit } = require('../middleware/auth');
 
 // Controllers spécifiques
 const {
   getSalon,
   updateSalon,
-//   getStaff,
-//   createStaff,
-//   updateStaff,
-//   deleteStaff,
+  getStaff,
+  createStaff,
+  updateStaff,
+  deleteStaff,
+  upgradeRequest,
+  updateConfigFidelite,
 } = require('../controllers/SalonController');
 const { getRappels } = require('../controllers/rappelController');
 const {
@@ -26,6 +28,11 @@ const {
   updateRendezVous,
   deleteRendezVous,
 } = require('../controllers/Rendezvouscontroller');
+
+const {
+  getAbonnement,         // ← ajouter
+  updateRappels,         // ← ajouter
+} = require('../controllers/SalonController');
 
 // Factory CRUD générique
 const createTenantController = require('../controllers/TenantController');
@@ -51,24 +58,36 @@ router.route('/')
   .get(getSalon)
   .put(authorize('owner'), updateSalon);
 
-// // ==================== STAFF ====================
-// router.route('/staff')
-//   .get(authorize('owner'), getStaff)
-//   .post(authorize('owner'), createStaff);
+router.post('/fidelite', authorize('owner'), updateConfigFidelite);
+router.post('/upgrade-request', authorize('owner'), upgradeRequest);
 
-// router.route('/staff/:userId')
-//   .put(authorize('owner'), updateStaff)
-//   .delete(authorize('owner'), deleteStaff);
+// ==================== STAFF ====================
+router.route('/staff')
+  .get(authorize('owner'), getStaff)
+  .post(authorize('owner'), checkPlanLimit('staff'), createStaff);
+
+router.route('/staff/:userId')
+  .put(authorize('owner'), updateStaff)
+  .delete(authorize('owner'), deleteStaff);
 
 // ==================== CLIENTS ====================
 router.route('/clients')
   .get(clientCtrl.getAll)
-  .post(clientCtrl.create);
+  .post(checkPlanLimit('clients'), clientCtrl.create);
 
 router.route('/clients/:id')
   .get(clientCtrl.getOne)
   .put(clientCtrl.update)
   .delete(authorize('owner'), clientCtrl.delete);
+
+  // ==================== ABONNEMENT ====================
+  router.route('/abonnement')
+  .get(authorize('owner'), getAbonnement);
+
+// ==================== RAPPELS ====================
+// Note: router.use(protect, belongsToSalon) déjà appliqué
+router.route('/rappels_config')
+  .get(authorize('owner'), getRappels); // Attention: getRappels est le contrôleur des entités Rappel
 
 // ==================== TYPES DE PRESTATIONS ====================
 router.route('/types-prestations')

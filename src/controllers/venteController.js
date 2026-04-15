@@ -72,10 +72,10 @@ exports.createVente = async (req, res, next) => {
     //   remisePct,
     //   total,
     // });
-    const vente = await Vente({
+    const vente = new Vente({
       ...rest,
       salon:        req.params.salonId,
-      employe:      req.user._id,
+      employe:      req.user?._id,
       items:        itemsCalcules,
       remise:       montantRemise,
       remisePct,
@@ -115,7 +115,7 @@ exports.updateVente = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Vente introuvable' });
     }
     const champsAutorises = ['statut', 'modePaiement', 'notes', 'remise', 'remisePct', 'fideliteAppliquee'];
-    champsAutorisés.forEach(champ => {
+    champsAutorises.forEach(champ => {
       if (req.body[champ] !== undefined) vente[champ] = req.body[champ];
     });
     

@@ -36,11 +36,17 @@ exports.getRendezVous = async (req, res, next) => {
 // @access  Private
 exports.createRendezVous = async (req, res, next) => {
   try {
-    const rdv = await RendezVous.create({
-      ...req.body,
+    const { clientId, typePrestationId, ...rest } = req.body;
+    
+    const rdv = new RendezVous({
+      ...rest,
+      client: clientId || req.body.client,
+      typePrestation: typePrestationId || req.body.typePrestation,
       salon:   req.params.salonId,
-      employe: req.body.employe || req.user._id,
+      employe: req.body.employe || req.user?._id,
     });
+
+    await rdv.save();
 
     await rdv.populate([
       { path: 'client',        select: 'nom telephone' },
@@ -60,6 +66,15 @@ exports.createRendezVous = async (req, res, next) => {
 exports.updateRendezVous = async (req, res, next) => {
   try {
     delete req.body.salon;
+
+    if (req.body.clientId) {
+      req.body.client = req.body.clientId;
+      delete req.body.clientId;
+    }
+    if (req.body.typePrestationId) {
+      req.body.typePrestation = req.body.typePrestationId;
+      delete req.body.typePrestationId;
+    }
 
     const rdv = await RendezVous.findOneAndUpdate(
       { _id: req.params.id, salon: req.params.salonId },
