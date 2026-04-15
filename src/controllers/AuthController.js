@@ -109,6 +109,53 @@ exports.login = async (req, res, next) => {
   }
 };
 
+// @desc    Login admin uniquement — rejette les non-admins avant d'émettre un token
+// @route   POST /api/auth/admin-login
+// @access  Public
+exports.adminLogin = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
+    }
+
+    const user = await User.findOne({ email }).select('+password');
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
+    }
+
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
+    }
+
+    if (!user.actif) {
+      return res.status(403).json({ success: false, message: 'Compte désactivé' });
+    }
+
+    // Refus explicite des non-admins côté backend
+    if (user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Accès administrateur requis' });
+    }
+
+    user.derniereConnexion = new Date();
+    await user.save();
+
+    const token = user.getSignedJwtToken();
+    console.log('Admin login réussi pour:', email);
+
+    res.status(200).json({
+      success: true,
+      ...buildSessionResponse(user, null, token),
+    });
+  } catch (err) {
+    console.error('Erreur lors du admin-login:', err);
+    next(err);
+  }
+};
+
+
 // @desc    Récupérer l'utilisateur connecté
 // @route   GET /api/auth/me
 // @access  Private
