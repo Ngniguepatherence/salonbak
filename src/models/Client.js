@@ -1,25 +1,31 @@
 const mongoose = require('mongoose');
 
 const clientSchema = new mongoose.Schema({
+    // Champ principal utilisé par le frontend
+    nom: {
+        type: String,
+        trim: true,
+        maxlength: [50, 'Le nom ne peut pas dépasser 50 caractères']
+    },
+    // Alias pour compatibilité (certains clients legacy utilisent 'name')
     name: {
         type: String,
-        required: [true, 'Please provide a name'],
         trim: true,
         maxlength: [50, 'Name can not be more than 50 characters']
     },
     telephone: {
         type: String,
-        required: [true, 'Please provide a telephone number'],
+        required: [true, 'Veuillez fournir un numéro de téléphone'],
         trim: true,
         maxlength: [20, 'Telephone number can not be more than 20 characters']
     },
     dateAnniversaire: {
         type: Date,
-        required: [true, 'Please provide a date of birth']
+        default: null,  // optionnel — non obligatoire à l'enregistrement
     },
     status: {
         type: String,
-        enum: ['nouvelle', 'reguliere', 'inactif'],
+        enum: ['nouvelle', 'reguliere', 'inactif', 'vip', 'nouveau'],
         default: 'nouvelle'
     },
     notes: {
@@ -35,8 +41,8 @@ const clientSchema = new mongoose.Schema({
   },
   statut: {
     type: String,
-    enum: ['nouveau','nouvelle', 'regulier', 'vip'],
-    default: 'nouveau',
+    enum: ['nouveau', 'nouvelle', 'regulier', 'reguliere', 'vip'],
+    default: 'nouvelle',
   },
  
   // ── Statistiques visites ───────────────────
