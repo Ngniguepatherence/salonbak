@@ -1,4 +1,4 @@
-const Vente   = require('../models/vente');
+const Vente = require('../models/vente');
 const Produit = require('../models/produit');
 
 // @desc    Lister les ventes d'un salon
@@ -8,17 +8,25 @@ exports.getVentes = async (req, res, next) => {
     const { from, to, clientId, statut } = req.query;
     const filter = { salon: req.params.salonId };
 
-    if (clientId) filter.clientId = clientId;
-    if (statut)   filter.statut   = statut;
-    if (from || to) {
-      filter.date = {};
-      if (from) filter.date.$gte = from;
-      if (to)   filter.date.$lte = to;
+    // —— STAFF : accès restreint au jour courant + ses propres ventes ——
+    if (req.user?.role === 'staff') {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      filter.date = today;
+      filter.employe = req.user._id;
+    } else {
+      // Owner / admin : filtres libres
+      if (clientId) filter.clientId = clientId;
+      if (statut) filter.statut = statut;
+      if (from || to) {
+        filter.date = {};
+        if (from) filter.date.$gte = from;
+        if (to) filter.date.$lte = to;
+      }
     }
 
     const ventes = await Vente.find(filter)
       .populate('clientId', 'nom telephone')
-      .populate('employe',  'name email')
+      .populate('employe', 'name email')
       .sort({ date: -1, createdAt: -1 });
 
     res.status(200).json({ success: true, count: ventes.length, data: ventes });
@@ -43,9 +51,9 @@ exports.createVente = async (req, res, next) => {
       montant: item.prixUnitaire * item.quantite,
     }));
 
-    const sousTotal      = itemsCalcules.reduce((s, i) => s + i.montant, 0);
-    const montantRemise  = remisePct > 0 ? (sousTotal * remisePct) / 100 : remise;
-    const totalMontant   = sousTotal - montantRemise;
+    const sousTotal = itemsCalcules.reduce((s, i) => s + i.montant, 0);
+    const montantRemise = remisePct > 0 ? (sousTotal * remisePct) / 100 : remise;
+    const totalMontant = sousTotal - montantRemise;
 
     // ── Décrémenter le stock pour les produits vendus ──
     const produitItems = itemsCalcules.filter(i => i.type === 'produit');
@@ -54,7 +62,7 @@ exports.createVente = async (req, res, next) => {
         produitItems.map(item =>
           Produit.findOneAndUpdate(
             { _id: item.referenceId, salon: req.params.salonId },
-            { $inc: { stock: -item.quantite } }, // ✅ quantite pas stock
+            { $inc: { quantite: -item.quantite } }, // décrémente le stock produit
             { new: true }
           )
         )
@@ -74,10 +82,10 @@ exports.createVente = async (req, res, next) => {
     // });
     const vente = new Vente({
       ...rest,
-      salon:        req.params.salonId,
-      employe:      req.user?._id,
-      items:        itemsCalcules,
-      remise:       montantRemise,
+      salon: req.params.salonId,
+      employe: req.user?._id,
+      items: itemsCalcules,
+      remise: montantRemise,
       remisePct,
       totalMontant,
     });
@@ -86,7 +94,7 @@ exports.createVente = async (req, res, next) => {
 
     await vente.populate([
       { path: 'clientId', select: 'nom telephone' },
-      { path: 'employe',  select: 'name email' },
+      { path: 'employe', select: 'name email' },
     ]);
 
     res.status(201).json({ success: true, data: vente });
@@ -111,19 +119,19 @@ exports.updateVente = async (req, res, next) => {
       // req.body,
       // { new: true, runValidators: true }
     )
-    if(!vente) {
+    if (!vente) {
       return res.status(404).json({ success: false, message: 'Vente introuvable' });
     }
     const champsAutorises = ['statut', 'modePaiement', 'notes', 'remise', 'remisePct', 'fideliteAppliquee'];
     champsAutorises.forEach(champ => {
       if (req.body[champ] !== undefined) vente[champ] = req.body[champ];
     });
-    
+
     await vente.save();
 
     await vente
-    .populate('clientId', 'nom telephone')
-      .populate('employe',  'name email');
+      .populate('clientId', 'nom telephone')
+      .populate('employe', 'name email');
 
 
     res.status(200).json({ success: true, data: vente });
@@ -137,7 +145,7 @@ exports.updateVente = async (req, res, next) => {
 exports.deleteVente = async (req, res, next) => {
   try {
     const vente = await Vente.findOne({
-      _id:   req.params.id,
+      _id: req.params.id,
       salon: req.params.salonId,
     });
 

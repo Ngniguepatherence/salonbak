@@ -42,11 +42,11 @@ const TypePrestation = require('../models/TypePrestation');
 const Produit = require('../models/produit');
 const Depense = require('../models/depense');
 
-const clientCtrl       = createTenantController(Client);
-const prestationCtrl   = createTenantController(Prestation);
-const typeCtrl         = createTenantController(TypePrestation);
-const produitCtrl      = createTenantController(Produit);
-const depenseCtrl      = createTenantController(Depense, [{ path: 'creePar', select: 'name' }]);
+const clientCtrl = createTenantController(Client);
+const prestationCtrl = createTenantController(Prestation);
+const typeCtrl = createTenantController(TypePrestation);
+const produitCtrl = createTenantController(Produit);
+const depenseCtrl = createTenantController(Depense, [{ path: 'creePar', select: 'name' }]);
 
 // ──────────────────────────────────────────────
 // Middlewares communs à toutes les routes salon
@@ -80,8 +80,8 @@ router.route('/clients/:id')
   .put(clientCtrl.update)
   .delete(authorize('owner'), clientCtrl.delete);
 
-  // ==================== ABONNEMENT ====================
-  router.route('/abonnement')
+// ==================== ABONNEMENT ====================
+router.route('/abonnement')
   .get(authorize('owner'), getAbonnement);
 
 // ==================== RAPPELS ====================
@@ -112,16 +112,17 @@ router.route('/prestations/:id')
 // ==================== PRODUITS ====================
 router.route('/produits')
   .get(produitCtrl.getAll)
-  .post(authorize('owner'), produitCtrl.create);
+  .post(authorize('owner', 'staff'), produitCtrl.create); // staff peut ajouter des produits
 
 router.route('/produits/:id')
   .get(produitCtrl.getOne)
-  .put(authorize('owner'), produitCtrl.update)
+  .put(authorize('owner', 'staff'), produitCtrl.update)
   .delete(authorize('owner'), produitCtrl.delete);
 
 // ==================== VENTES ====================
+// owner → tout voir ; staff → seulement ses ventes du jour (filtrées côté controller)
 router.route('/ventes')
-  .get(getVentes)
+  .get(authorize('owner', 'staff'), getVentes)
   .post(createVente);
 
 router.route('/ventes/:id')

@@ -22,9 +22,14 @@ const produitSchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'La catégorie ne peut pas dépasser 100 caractères'],
   },
+  unite: {
+    type: String,
+    trim: true,
+    default: 'piece',
+  },
   prixAchat: {
     type: Number,
-    min: [0, 'Le prix d\'achat ne peut pas être négatif'],
+    min: [0, "Le prix d'achat ne peut pas être négatif"],
     default: 0,
   },
   prixVente: {
