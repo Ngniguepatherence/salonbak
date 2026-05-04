@@ -100,6 +100,10 @@ venteSchema.post('save', async function (doc) {
   if (!doc.clientId) return;
   // Vente annulée → pas de points
   if (doc.statut === 'annulee') return;
+
+  // ── Points UNIQUEMENT si la vente contient au moins une prestation ──
+  const hasPrestation = (doc.items || []).some(i => i.type === 'prestation');
+  if (!hasPrestation) return;
  
   try {
     const Client = mongoose.model('Client');
@@ -112,11 +116,10 @@ venteSchema.post('save', async function (doc) {
  
     if (!client || !salon) return;
  
-    // 1 point par visite (= 1 vente), montant total dépensé
+    // 1 point par visite contenant une prestation
     const points = 1;
     client.enregistrerVisite(doc.totalMontant, salon.configFidelite);
-    client.pointsAttribues = points; // pour info, pas bloquant
- 
+
     // Snapshot des points attribués sur la vente elle-même
     // (sans re-déclencher le hook → updateOne direct)
     await Promise.all([

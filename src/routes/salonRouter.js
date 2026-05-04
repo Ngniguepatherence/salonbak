@@ -42,7 +42,7 @@ const TypePrestation = require('../models/TypePrestation');
 const Produit = require('../models/produit');
 const Depense = require('../models/depense');
 
-const clientCtrl = createTenantController(Client);
+const clientCtrl = require('../controllers/ClientController');
 const prestationCtrl = createTenantController(Prestation);
 const typeCtrl = createTenantController(TypePrestation);
 const produitCtrl = createTenantController(Produit);
@@ -63,7 +63,7 @@ router.post('/upgrade-request', authorize('owner'), upgradeRequest);
 
 // ==================== STAFF ====================
 router.route('/staff')
-  .get(authorize('owner'), getStaff)
+  .get(authorize('owner', 'staff'), getStaff)
   .post(authorize('owner'), checkPlanLimit('staff'), createStaff);
 
 router.route('/staff/:userId')
@@ -71,8 +71,10 @@ router.route('/staff/:userId')
   .delete(authorize('owner'), deleteStaff);
 
 // ==================== CLIENTS ====================
+router.get('/clients/search', clientCtrl.search);
+
 router.route('/clients')
-  .get(clientCtrl.getAll)
+  .get(authorize('owner'), clientCtrl.getAll)
   .post(checkPlanLimit('clients'), clientCtrl.create);
 
 router.route('/clients/:id')

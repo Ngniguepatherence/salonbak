@@ -62,7 +62,7 @@ exports.createVente = async (req, res, next) => {
         produitItems.map(item =>
           Produit.findOneAndUpdate(
             { _id: item.referenceId, salon: req.params.salonId },
-            { $inc: { quantite: -item.quantite } }, // décrémente le stock produit
+            { $inc: { stock: -item.quantite } }, // ✅ quantite pas stock
             { new: true }
           )
         )
@@ -83,7 +83,7 @@ exports.createVente = async (req, res, next) => {
     const vente = new Vente({
       ...rest,
       salon: req.params.salonId,
-      employe: req.user?._id,
+      employe: rest.employe || req.user?._id,
       items: itemsCalcules,
       remise: montantRemise,
       remisePct,

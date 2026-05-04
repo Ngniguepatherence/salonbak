@@ -23,6 +23,12 @@ const clientSchema = new mongoose.Schema({
         type: Date,
         default: null,  // optionnel — non obligatoire à l'enregistrement
     },
+    statut: {
+        type: String,
+        enum: ['nouvelle', 'reguliere', 'inactif', 'vip', 'nouveau'],
+        default: 'nouvelle'
+    },
+    // Alias pour compatibilité (certains clients legacy utilisent 'status')
     status: {
         type: String,
         enum: ['nouvelle', 'reguliere', 'inactif', 'vip', 'nouveau'],
@@ -38,11 +44,6 @@ const clientSchema = new mongoose.Schema({
     type: Number,
     default: 0,
     min: [0, 'Les points ne peuvent pas être négatifs'],
-  },
-  statut: {
-    type: String,
-    enum: ['nouveau', 'nouvelle', 'regulier', 'reguliere', 'vip'],
-    default: 'nouvelle',
   },
  
   // ── Statistiques visites ───────────────────
@@ -79,12 +80,25 @@ const clientSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  groupe: {
+    type: String,
+    trim: true,
+    default: '',
+  },
     salon: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Salon',
         required: [true, 'Please provide a salon']
     }
 }, { timestamps: true });
+
+clientSchema.pre('save', async function() {
+    if (this.isModified('statut')) {
+        this.status = this.statut;
+    } else if (this.isModified('status')) {
+        this.statut = this.status;
+    }
+});
 
 clientSchema.index({ salon: 1, nom: 1 });
 clientSchema.index({ salon: 1, statut: 1 });
