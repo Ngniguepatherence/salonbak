@@ -108,13 +108,12 @@ clientSchema.index({ salon: 1, parrainId: 1 }); // retrouver les filleuls d'un p
 
 clientSchema.methods.ajouterPoints = function (points, configFidelite) {
   this.pointsFidelite += points;
-  this.nombreVisites  += points;
  
   // Mise à jour automatique du statut
   if (this.pointsFidelite >= configFidelite.visitesVIP) {
     this.statut = 'vip';
   } else if (this.pointsFidelite >= configFidelite.visitesRequises) {
-    this.statut = 'regulier';
+    this.statut = 'reguliere';
   } else {
     this.statut = 'nouveau';
   }

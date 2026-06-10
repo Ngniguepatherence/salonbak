@@ -132,7 +132,11 @@ const salonSchema = new mongoose.Schema({
   horaires: {
     type: String,
     trim: true,
-    maxlength: [100, 'Les horaires ne peuvent pas dépasser 100 caractères'],
+    maxlength: [1000, 'Les horaires ne peuvent pas dépasser 1000 caractères'],
+  },
+  availability: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
   },
 
   // ── Rappels & SAV ─────────────────────────

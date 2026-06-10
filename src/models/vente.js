@@ -165,7 +165,7 @@ venteSchema.post('findOneAndUpdate', async function (doc) {
     if (client.pointsFidelite >= cfg.visitesVIP) {
       client.statut = 'vip';
     } else if (client.pointsFidelite >= cfg.visitesRequises) {
-      client.statut = 'regulier';
+      client.statut = 'reguliere';
     } else {
       client.statut = 'nouveau';
     }

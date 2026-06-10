@@ -8,7 +8,7 @@ const User  = require('../models/User');
 const OWNER_EDITABLE_FIELDS = [
   'name', 'slogan', 'description', 'logoUrl', 'typeEtablissement',
   'phone', 'email',
-  'address', 'ville', 'pays', 'devise', 'horaires',
+  'address', 'ville', 'pays', 'devise', 'horaires', 'availability',
   'joursRappelInactivite', 'joursRappelSuivi','configFidelite',
 ];
 
@@ -192,22 +192,27 @@ exports.createStaff = async (req, res, next) => {
 
 exports.updateStaff = async (req, res, next) => {
   try {
-    // Champs interdits
-    delete req.body.role;
-    delete req.body.salon;
-    delete req.body.password;
-
-    const staff = await User.findOneAndUpdate(
-      { _id: req.params.userId, salon: req.params.salonId, role: 'staff' },
-      req.body,
-      { new: true, runValidators: true }
-    ).select('-password');
+    const staff = await User.findOne({
+      _id: req.params.userId,
+      salon: req.params.salonId,
+      role: 'staff'
+    });
 
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Membre du staff introuvable' });
     }
 
-    res.status(200).json({ success: true, data: staff });
+    // Mettre à jour les champs autorisés
+    if (req.body.name !== undefined) staff.name = req.body.name;
+    if (req.body.email !== undefined) staff.email = req.body.email;
+    if (req.body.telephone !== undefined) staff.telephone = req.body.telephone;
+    if (req.body.password !== undefined && req.body.password !== '') {
+      staff.password = req.body.password; // Ce sera hashé par le hook pre('save') !
+    }
+
+    await staff.save();
+
+    res.status(200).json({ success: true, data: { ...staff.toObject(), password: undefined } });
   } catch (err) {
     next(err);
   }

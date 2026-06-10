@@ -42,6 +42,19 @@ const TypePrestation = require('../models/TypePrestation');
 const Produit = require('../models/produit');
 const Depense = require('../models/depense');
 
+// Campagnes & Groupes de contacts
+const {
+  getCampagnes,
+  createCampagne,
+  updateCampagne,
+  deleteCampagne,
+  updateStats,
+  getGroupes,
+  createGroupe,
+  updateGroupe,
+  deleteGroupe,
+} = require('../controllers/campaignController');
+
 const clientCtrl = require('../controllers/ClientController');
 const prestationCtrl = createTenantController(Prestation);
 const typeCtrl = createTenantController(TypePrestation);
@@ -76,6 +89,8 @@ router.get('/clients/search', clientCtrl.search);
 router.route('/clients')
   .get(authorize('owner'), clientCtrl.getAll)
   .post(checkPlanLimit('clients'), clientCtrl.create);
+
+router.post('/clients/bulk', authorize('owner', 'staff'), checkPlanLimit('clients'), clientCtrl.bulkCreate);
 
 router.route('/clients/:id')
   .get(clientCtrl.getOne)
@@ -153,6 +168,26 @@ router.route('/rendez-vous/:id')
 // ==================== RAPPELS ====================
 router.route('/:salonId/rappels')
   .get(authorize('owner'), getRappels);
+
+// ==================== CAMPAGNES ====================
+router.route('/campagnes')
+  .get(authorize('owner', 'staff'), getCampagnes)
+  .post(authorize('owner'), createCampagne);
+
+router.route('/campagnes/:id')
+  .put(authorize('owner'), updateCampagne)
+  .delete(authorize('owner'), deleteCampagne);
+
+router.post('/campagnes/:id/update-stats', authorize('owner', 'staff'), updateStats);
+
+// ==================== GROUPES DE CONTACTS ====================
+router.route('/groupes-contacts')
+  .get(authorize('owner', 'staff'), getGroupes)
+  .post(authorize('owner'), createGroupe);
+
+router.route('/groupes-contacts/:id')
+  .put(authorize('owner'), updateGroupe)
+  .delete(authorize('owner'), deleteGroupe);
 
 
 module.exports = router;

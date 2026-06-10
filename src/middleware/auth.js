@@ -40,6 +40,7 @@ exports.protect = async (req, res, next) => {
  */
 exports.authorize = (...roles) => {
   return (req, res, next) => {
+    if (req.user.role === 'admin') return next();
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
@@ -57,7 +58,7 @@ exports.authorize = (...roles) => {
 exports.belongsToSalon = (req, res, next) => {
   const salonId = req.params.salonId;
 
-  // if (req.user.role === 'admin') return next();
+  if (req.user.role === 'admin') return next();
 
   const userSalonId = req.user.salon?._id?.toString() || req.user.salon?.toString();
 
@@ -77,6 +78,7 @@ exports.belongsToSalon = (req, res, next) => {
  */
 exports.checkPlanLimit = (resourceType) => {
   return async (req, res, next) => {
+    if (req.user.role === 'admin') return next();
     const { getPlan } = require('../config/plans');
     const Client = require('../models/Client');
     const User = require('../models/User');
@@ -109,12 +111,18 @@ exports.checkPlanLimit = (resourceType) => {
       currentCount = await Model.countDocuments({ salon: salon._id });
     }
 
-    if (currentCount >= currentLimit) {
+    const itemsToAdd = (resourceType === 'clients' && req.body.clients && Array.isArray(req.body.clients)) 
+      ? req.body.clients.length 
+      : 1;
+
+    if (currentLimit !== -1 && (currentCount + itemsToAdd > currentLimit)) {
       return res.status(403).json({
         success: false,
-        message: `Limite de votre plan atteint (${currentLimit} ${resourceType}). Veuillez passer au plan supérieur pour en ajouter plus.`,
+        message: `Limite de votre plan atteinte. Vous essayez d'ajouter ${itemsToAdd} ${resourceType} mais il ne reste que ${currentLimit - currentCount} places. Veuillez passer au plan supérieur.`,
         limitReached: true,
-        limit: currentLimit
+        limit: currentLimit,
+        currentCount,
+        itemsToAdd
       });
     }
 
@@ -126,7 +134,7 @@ exports.checkPlanLimit = (resourceType) => {
  * Vérifie que l'abonnement du salon est actif
  */
 exports.requireActiveSubscription = (req, res, next) => {
-  // if (req.user.role === 'admin') return next();
+  if (req.user.role === 'admin') return next();
 
   const salon = req.user.salon;
   if (!salon || !salon.isActive) {
