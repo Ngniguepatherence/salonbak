@@ -16,9 +16,9 @@ const app = express();
 app.use(helmet());
 app.use(cors({
 
-    origin: '*', //process.env.FRONTEND_URL || 'https://app.westdigitalhub.com',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    credentials: true,
+  origin: process.env.FRONTEND_URL || 'https://app.westdigitalhub.com',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  credentials: true,
 }
 
 ));
@@ -42,7 +42,7 @@ app.get('/payment-completed', protect, (req, res) => {
 });
 
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'OK', message: 'Server is healthy' });
+  res.json({ status: 'OK', message: 'Server is healthy' });
 });
 
 // // Route non trouvée
@@ -56,6 +56,6 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
