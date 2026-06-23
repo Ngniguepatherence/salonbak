@@ -46,7 +46,7 @@ const configFideliteSchema = new mongoose.Schema({
   reductionPourcentage: {
     type: Number,
     default: 10,
-    min: [1,   'Minimum 1%'],
+    min: [1, 'Minimum 1%'],
     max: [100, 'Maximum 100%'],
   },
   visitesVIP: {
@@ -68,6 +68,11 @@ const salonSchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'Le nom ne peut pas dépasser 100 caractères'],
   },
+  slug: {
+    type: String,
+    unique: true,
+    sparse: true,
+  },
   slogan: {
     type: String,
     trim: true,
@@ -81,6 +86,14 @@ const salonSchema = new mongoose.Schema({
   logoUrl: {
     type: String,
     trim: true,
+  },
+  bannerUrl: {
+    type: String,
+    trim: true,
+  },
+  galleryUrls: {
+    type: [String],
+    default: []
   },
   typeEtablissement: {
     type: String,
@@ -122,6 +135,10 @@ const salonSchema = new mongoose.Schema({
     default: 'CM',
     maxlength: [10, 'Le code pays ne peut pas dépasser 10 caractères'],
   },
+  location: {
+    lat: { type: Number },
+    lng: { type: Number }
+  },
 
   // ── Paramètres métier ─────────────────────
   devise: {
@@ -143,13 +160,13 @@ const salonSchema = new mongoose.Schema({
   joursRappelInactivite: {
     type: Number,
     default: 30,
-    min: [7,   'Minimum 7 jours'],
+    min: [7, 'Minimum 7 jours'],
     max: [365, 'Maximum 365 jours'],
   },
   joursRappelSuivi: {
     type: Number,
     default: 14,
-    min: [7,  'Minimum 7 jours'],
+    min: [7, 'Minimum 7 jours'],
     max: [90, 'Maximum 90 jours'],
   },
 
@@ -181,6 +198,7 @@ const salonSchema = new mongoose.Schema({
   limits: {
     maxCustomers: { type: Number, default: 300 },
     maxStaff: { type: Number, default: 2 },
+    maxRendezvous: { type: Number, default: 100 },
     maxCampaignsPerMonth: { type: Number, default: 0 },
     exportEnabled: { type: Boolean, default: false },
     campaignsEnabled: { type: Boolean, default: false },
@@ -205,5 +223,14 @@ salonSchema.methods.joursAvantExpiration = function () {
   const diff = fin.getTime() - Date.now();
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 };
+
+salonSchema.pre('save', function () {
+  if (this.isModified('name') && !this.slug) {
+    this.slug = this.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)+/g, '') + '-' + Math.random().toString(36).substring(2, 6);
+  }
+});
 
 module.exports = mongoose.model('Salon', salonSchema);

@@ -6,7 +6,7 @@ const User  = require('../models/User');
 // (tout ce qui n'est pas ici est bloqué)
 // ─────────────────────────────────────────────
 const OWNER_EDITABLE_FIELDS = [
-  'name', 'slogan', 'description', 'logoUrl', 'typeEtablissement',
+  'name', 'slogan', 'description', 'logoUrl', 'bannerUrl', 'galleryUrls', 'typeEtablissement',
   'phone', 'email',
   'address', 'ville', 'pays', 'devise', 'horaires', 'availability',
   'joursRappelInactivite', 'joursRappelSuivi','configFidelite',
@@ -206,6 +206,7 @@ exports.updateStaff = async (req, res, next) => {
     if (req.body.name !== undefined) staff.name = req.body.name;
     if (req.body.email !== undefined) staff.email = req.body.email;
     if (req.body.telephone !== undefined) staff.telephone = req.body.telephone;
+    if (req.body.avatarUrl !== undefined) staff.avatarUrl = req.body.avatarUrl;
     if (req.body.password !== undefined && req.body.password !== '') {
       staff.password = req.body.password; // Ce sera hashé par le hook pre('save') !
     }

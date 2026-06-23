@@ -23,6 +23,9 @@ const typePrestationSchema = new mongoose.Schema({
     trim: true,
     maxlength: [500, 'La description ne peut pas dépasser 500 caractères'],
   },
+  imageUrl: {
+    type: String,
+  },
   couleur: {
     type: String,
     default: '#6366f1', // couleur par défaut

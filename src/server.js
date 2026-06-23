@@ -4,6 +4,7 @@ const connectDB = require('./config/database');
 const dotenv = require('dotenv');
 const helmet = require('helmet');
 const errorHandler = require('./middleware/error');
+const { protect } = require('./middleware/auth');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -27,8 +28,19 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/api/auth', require('./routes/AuthRouter'));
+app.use('/api/marketplace', require('./routes/MarketplaceRouter'));
 app.use('/api/salons/:salonId', require('./routes/salonRouter'));
 app.use('/api/admin', require('./routes/AdminRouter'));
+app.use('/api/payments', require('./routes/PaymentRouter'));
+app.use('/api/upload', require('./routes/uploadRoutes'));
+
+app.get('/payment-completed', protect, (req, res) => {
+  if (req.query.status === 'successful') {
+    return res.sendFile(path.join(process.cwd(), 'public', 'payment-completed.html'));
+  }
+  return res.sendFile(path.join(process.cwd(), 'public', 'payment-failed.html'));
+});
+
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is healthy' });
 });

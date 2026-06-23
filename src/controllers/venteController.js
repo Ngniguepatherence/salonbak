@@ -144,10 +144,15 @@ exports.updateVente = async (req, res, next) => {
 // @route   DELETE /api/salons/:salonId/ventes/:id
 exports.deleteVente = async (req, res, next) => {
   try {
-    const vente = await Vente.findOne({
+    const filter = {
       _id: req.params.id,
       salon: req.params.salonId,
-    });
+    };
+    if (req.user?.role === 'staff') {
+      filter.employe = req.user._id;
+    }
+
+    const vente = await Vente.findOne(filter);
 
     if (!vente) {
       return res.status(404).json({ success: false, message: 'Vente introuvable' });
@@ -160,7 +165,7 @@ exports.deleteVente = async (req, res, next) => {
         produitItems.map(item =>
           Produit.findOneAndUpdate(
             { _id: item.referenceId, salon: req.params.salonId },
-            { $inc: { quantite: +item.quantite } }, // ✅ on remet le stock
+            { $inc: { stock: +item.quantite } }, // ✅ on remet le stock
             { new: true }
           )
         )
@@ -169,7 +174,7 @@ exports.deleteVente = async (req, res, next) => {
 
     // ── Pas de restauration pour les prestations ──
 
-    await vente.deleteOne();
+    await Vente.findByIdAndDelete(vente._id);
     res.status(200).json({ success: true, data: {} });
   } catch (err) {
     next(err);

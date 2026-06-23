@@ -91,6 +91,8 @@ router.route('/clients')
   .post(checkPlanLimit('clients'), clientCtrl.create);
 
 router.post('/clients/bulk', authorize('owner', 'staff'), checkPlanLimit('clients'), clientCtrl.bulkCreate);
+router.post('/clients/check-duplicates', authorize('owner', 'staff'), clientCtrl.checkDuplicates);
+router.post('/clients/bulk-import', authorize('owner', 'staff'), clientCtrl.bulkImport);
 
 router.route('/clients/:id')
   .get(clientCtrl.getOne)
@@ -144,7 +146,7 @@ router.route('/ventes')
 
 router.route('/ventes/:id')
   .put(authorize('owner'), updateVente)
-  .delete(authorize('owner'), deleteVente);
+  .delete(authorize('owner', 'staff'), deleteVente);
 
 // ==================== DÉPENSES ====================
 router.route('/depenses')
@@ -159,7 +161,7 @@ router.route('/depenses/:id')
 // ==================== RENDEZ-VOUS ====================
 router.route('/rendez-vous')
   .get(getRendezVous)
-  .post(createRendezVous);
+  .post(checkPlanLimit('rendezvous'), createRendezVous);
 
 router.route('/rendez-vous/:id')
   .put(updateRendezVous)

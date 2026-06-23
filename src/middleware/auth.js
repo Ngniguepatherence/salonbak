@@ -35,6 +35,38 @@ exports.protect = async (req, res, next) => {
 };
 
 /**
+ * Vérifie le token JWT et attache l'AppUser à req.user
+ */
+exports.protectAppUser = async (req, res, next) => {
+  let token;
+  if (req.headers.authorization?.startsWith('Bearer ')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'Accès non autorisé — token manquant' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const AppUser = require('../models/AppUser');
+    const user = await AppUser.findById(decoded.id);
+
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Utilisateur introuvable' });
+    }
+
+    if (!user.actif) {
+      return res.status(403).json({ success: false, message: 'Compte désactivé' });
+    }
+
+    req.appUser = user;
+    next();
+  } catch (err) {
+    return res.status(401).json({ success: false, message: 'Token invalide ou expiré' });
+  }
+};
+
+/**
  * Restreint l'accès à certains rôles
  * Usage : authorize('admin', 'owner')
  */
@@ -82,6 +114,7 @@ exports.checkPlanLimit = (resourceType) => {
     const { getPlan } = require('../config/plans');
     const Client = require('../models/Client');
     const User = require('../models/User');
+    const Rendezvous = require('../models/Rendezvous');
 
     const salon = req.user.salon;
     if (!salon) return next();
@@ -101,6 +134,11 @@ exports.checkPlanLimit = (resourceType) => {
         // Le staff sont des Users avec le rôle 'staff' dans ce salon
         currentCount = await User.countDocuments({ salon: salon._id, role: 'staff' });
         break;
+      case 'rendezvous':
+      case 'rendez-vous':
+        currentLimit = limits?.maxRendezvous ?? -1;
+        Model = Rendezvous;
+        break;
     }
 
     // -1 signifie illimité
@@ -118,7 +156,7 @@ exports.checkPlanLimit = (resourceType) => {
     if (currentLimit !== -1 && (currentCount + itemsToAdd > currentLimit)) {
       return res.status(403).json({
         success: false,
-        message: `Limite de votre plan atteinte. Vous essayez d'ajouter ${itemsToAdd} ${resourceType} mais il ne reste que ${currentLimit - currentCount} places. Veuillez passer au plan supérieur.`,
+        message: `Limite de votre plan atteinte. Vous essayez d'ajouter ${itemsToAdd} ${resourceType === 'rendezvous' || resourceType === 'rendez-vous' ? 'rendez-vous' : resourceType} mais il ne reste que ${currentLimit - currentCount} places. Veuillez passer au plan supérieur.`,
         limitReached: true,
         limit: currentLimit,
         currentCount,

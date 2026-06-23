@@ -83,6 +83,7 @@ exports.updateSalonStatus = async (req, res, next) => {
       salon.limits = {
         maxCustomers: config.maxCustomers,
         maxStaff: config.maxStaff,
+        maxRendezvous: config.maxRendezvous,
         maxCampaignsPerMonth: config.maxCampaignsPerMonth,
         exportEnabled: config.exportEnabled,
         campaignsEnabled: config.campaignsEnabled,
@@ -157,6 +158,7 @@ exports.createSalon = async (req, res, next) => {
       limits: {
         maxCustomers: config.maxCustomers,
         maxStaff: config.maxStaff,
+        maxRendezvous: config.maxRendezvous,
         maxCampaignsPerMonth: config.maxCampaignsPerMonth,
         exportEnabled: config.exportEnabled,
         campaignsEnabled: config.campaignsEnabled,

@@ -37,13 +37,18 @@ const rendezVousSchema = new mongoose.Schema({
   },
   statut: {
     type: String,
-    enum: ['en_attente', 'confirme', 'termine', 'annule'],
+    enum: ['en_attente', 'confirme', 'termine', 'annule', 'paid'],
     default: 'en_attente',
   },
   notes: {
     type: String,
     trim: true,
     maxlength: [500, 'Les notes ne peuvent pas dépasser 500 caractères'],
+  },
+  reference: {
+    type: String,
+    unique: true,
+    sparse: true,
   },
 }, { timestamps: true });
 

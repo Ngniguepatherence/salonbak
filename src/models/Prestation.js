@@ -42,6 +42,11 @@ const prestationSchema = new mongoose.Schema({
     trim: true,
     maxlength: [500, 'Les notes ne peuvent pas dépasser 500 caractères'],
   },
+  // Images (avant/après ou réalisations)
+  imageUrls: {
+    type: [String],
+    default: [],
+  },
 }, { timestamps: true });
 
 prestationSchema.index({ salon: 1, clientId: 1 });
