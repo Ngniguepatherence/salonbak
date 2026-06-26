@@ -38,6 +38,134 @@ function sanitizeBody(body, role) {
 }
 
 // ─────────────────────────────────────────────
+// POST /api/salons/onboard
+// (Owner créant son premier salon)
+// ─────────────────────────────────────────────
+exports.onboardSalon = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'owner') {
+      return res.status(403).json({ success: false, message: 'Seul un propriétaire peut créer un salon' });
+    }
+    if (user.salon) {
+      return res.status(400).json({ success: false, message: 'Vous avez déjà un salon associé' });
+    }
+
+    const {
+      name, phone, email, address, ville, typeEtablissement, description, logoUrl, bannerUrl, galleryUrls, plan,
+      slogan, devise, pays, horaires
+    } = req.body;
+
+    if (!name || !phone || !email || !address) {
+      return res.status(400).json({ success: false, message: 'name, phone, email et address sont requis' });
+    }
+
+    const { PLANS } = require('../config/plans');
+    const config = PLANS ? (PLANS[plan || 'pro'] || PLANS.pro) : {
+      maxCustomers: 500, maxStaff: 5, maxRendezvous: 200, maxCampaignsPerMonth: 0, exportEnabled: false, campaignsEnabled: false
+    };
+
+    const salon = await Salon.create({
+      name,
+      phone,
+      email,
+      address,
+      ville,
+      typeEtablissement: typeEtablissement || 'salon_coiffure',
+      description,
+      logoUrl,
+      bannerUrl,
+      galleryUrls: galleryUrls || [],
+      slogan,
+      devise: devise || 'FCFA',
+      pays: pays || 'CM',
+      horaires,
+      owner: user._id,
+      plan: plan || 'pro',
+      isActive: true,
+      limits: {
+        maxCustomers: config.maxCustomers || 500,
+        maxStaff: config.maxStaff || 5,
+        maxRendezvous: config.maxRendezvous || 200,
+        maxCampaignsPerMonth: config.maxCampaignsPerMonth || 0,
+        exportEnabled: config.exportEnabled || false,
+        campaignsEnabled: config.campaignsEnabled || false,
+      },
+      abonnement: {
+        statut: 'essai',
+        dateDebut: Date.now(),
+        dateFin: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) // 14 days trial as stated in UI
+      }
+    });
+
+    user.salon = salon._id;
+    await user.save();
+
+    // Renvoyer la session mise à jour (via AuthController)
+    const { buildSessionResponse } = require('./AuthController');
+    const token = user.getSignedJwtToken();
+
+    res.status(201).json({
+      success: true,
+      ...buildSessionResponse(user, salon, token)
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────
+// POST /api/salons/link
+// (Owner liant son compte à un salon existant via slug ou ID)
+// ─────────────────────────────────────────────
+exports.linkSalon = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'owner') {
+      return res.status(403).json({ success: false, message: 'Seul un propriétaire peut lier un salon' });
+    }
+    if (user.salon) {
+      return res.status(400).json({ success: false, message: 'Vous avez déjà un salon associé' });
+    }
+
+    const { identifier } = req.body;
+
+    if (!identifier) {
+      return res.status(400).json({ success: false, message: 'slug ou identifiant du salon requis' });
+    }
+
+    let salon = await Salon.findOne({ slug: identifier.trim().toLowerCase() });
+    
+    if (!salon) {
+      const mongoose = require('mongoose');
+      if (mongoose.Types.ObjectId.isValid(identifier.trim())) {
+        salon = await Salon.findById(identifier.trim());
+      }
+    }
+
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable avec ce code ou slug' });
+    }
+
+    // Associer le salon à l'utilisateur
+    user.salon = salon._id;
+    await user.save();
+
+    // Renvoyer la session mise à jour (via AuthController)
+    const { buildSessionResponse } = require('./AuthController');
+    const token = user.getSignedJwtToken();
+
+    res.status(200).json({
+      success: true,
+      message: 'Salon lié avec succès !',
+      ...buildSessionResponse(user, salon, token)
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────
 // GET /api/salons/:salonId
 // ─────────────────────────────────────────────
 exports.getSalon = async (req, res, next) => {
@@ -195,7 +323,7 @@ exports.updateStaff = async (req, res, next) => {
     const staff = await User.findOne({
       _id: req.params.userId,
       salon: req.params.salonId,
-      role: 'staff'
+      role: { $in: ['staff', 'owner'] }
     });
 
     if (!staff) {
@@ -207,6 +335,7 @@ exports.updateStaff = async (req, res, next) => {
     if (req.body.email !== undefined) staff.email = req.body.email;
     if (req.body.telephone !== undefined) staff.telephone = req.body.telephone;
     if (req.body.avatarUrl !== undefined) staff.avatarUrl = req.body.avatarUrl;
+    if (req.body.availability !== undefined) staff.availability = req.body.availability;
     if (req.body.password !== undefined && req.body.password !== '') {
       staff.password = req.body.password; // Ce sera hashé par le hook pre('save') !
     }

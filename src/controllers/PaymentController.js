@@ -16,11 +16,14 @@ const getTranzakToken = async () => {
   }
   console.log('starting');
   try {
-    const response = await axios.post(`${process.env.TRANZAK_API_BASE_URL || 'https://sandbox.dsapi.tranzak.me'}/auth/token`, {
+    const response = await axios.post(`${process.env.TRANZAK_API_BASE_URL || 'https://dsapi.tranzak.me'}/auth/token`, {
       appId: process.env.TRANZAK_APP_ID,
       appKey: process.env.TRANZAK_APP_KEY,
     });
     console.log('response', response.data);
+    if (!response.data.success) {
+      throw new Error(`Erreur d'authentification Tranzak: ${response.data.errorMsg} (Code: ${response.data.errorCode})`);
+    }
     return response.data.data.token;
   } catch (error) {
     console.error('Erreur lors de l\'obtention du token Tranzak:', error.response?.data || error.message);
@@ -33,7 +36,7 @@ exports.payWithMomo = async (amount, phone) => {
   const token = await getTranzakToken();
 
   const response = await axios.post(
-    "https://sandbox.dsapi.tranzak.me/xp021/v1/request/create-mobile-wallet-charge",
+    "https://dsapi.tranzak.me/xp021/v1/request/create-mobile-wallet-charge",
     {
       amount,
       currencyCode: "XAF",
@@ -57,89 +60,89 @@ exports.payWithMomo = async (amount, phone) => {
  * Initie un paiement d'abonnement pour un Salon via Tranzak
  */
 exports.initiateSubscriptionPayment = async (req, res, next) => {
-  try {
-    const { salonId } = req.params;
-    const { plan, dureeJours = 30 } = req.body;
+  // try {
+  const { salonId } = req.params;
+  const { plan, dureeJours = 30 } = req.body;
 
-    // Déterminer le montant en fonction du plan (à adapter selon votre logique)
-    const selectedPlan = getPlan(plan);
-    const montant = selectedPlan.price || 25000;
+  // Déterminer le montant en fonction du plan (à adapter selon votre logique)
+  const selectedPlan = getPlan(plan);
+  const montant = selectedPlan.price || 25000;
 
-    const salon = await Salon.findById(salonId);
-    if (!salon) {
-      return res.status(404).json({ success: false, message: 'Salon introuvable' });
-    }
-    // console.log('salon', salon);
-
-    // Générer une référence unique
-    const reference = `SUB-${crypto.randomUUID()}`;
-
-    // 1. Créer la transaction en base de données en statut 'pending'
-    const transaction = await Transaction.create({
-      salonId: salon._id,
-      userId: req.user.id, // Assurez-vous que la route est protégée par un middleware d'authentification
-      montant,
-      devise: 'XAF', // Tranzak utilise souvent XAF au lieu de FCFA
-      reference,
-      type: 'abonnement',
-      plan: plan || 'basic',
-      dureeJours: dureeJours || 30,
-    });
-    // console.log('transaction', transaction);
-
-    // 2. Récupérer le token Tranzak
-    const token = await getTranzakToken();
-
-    let paymentLink;
-
-    if (token === 'mock-token') {
-      // Mock payment mode
-      paymentLink = `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/payments/simulate-payment?ref=${reference}&salonId=${salonId}&returnUrl=${encodeURIComponent(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/dashboard/salon/${salonId}?payment=success`)}`;
-      transaction.tranzakRequestId = 'mock-' + crypto.randomUUID();
-      await transaction.save();
-    } else {
-      // 3. Créer la requête de paiement (Web Redirect) Tranzak
-      const tranzakResponse = await axios.post(
-        `${process.env.TRANZAK_API_BASE_URL || 'https://sandbox.dsapi.tranzak.me'}/xp021/v1/request/create`,
-        {
-          amount: montant,
-          currencyCode: 'XAF',
-          description: `Abonnement au plan ${plan || 'Basic'} pour ${salon.name}`,
-          mchTransactionRef: reference,
-          returnUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/payments/verify?ref=${reference}&returnUrl=${encodeURIComponent(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?payment=success`)}`
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-      console.log('tranzakResponse', tranzakResponse.data?.data?.links.paymentAuthUrl);
-
-      // Tranzak renvoie la structure: { data: { paymentAuthUrl: "...", requestId: "..." }, success: true }
-      paymentLink = tranzakResponse.data?.data?.links.paymentAuthUrl
-      console.log('paymentLink', paymentLink);
-      // Mettre à jour la transaction avec l'ID Tranzak
-      if (tranzakResponse.data?.data?.requestId) {
-        transaction.tranzakRequestId = tranzakResponse.data.data.requestId;
-        await transaction.save();
-        console.log('transaction', transaction);
-      }
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Paiement initié',
-      data: {
-        paymentLink,
-        transactionId: transaction._id,
-      }
-    });
-
-  } catch (error) {
-    console.error('Erreur initiateSubscriptionPayment:', error);
-    res.status(500).json({ success: false, message: 'Erreur lors de l\'initiation du paiement' });
+  const salon = await Salon.findById(salonId);
+  if (!salon) {
+    return res.status(404).json({ success: false, message: 'Salon introuvable' });
   }
+  // console.log('salon', salon);
+
+  // Générer une référence unique
+  const reference = `SUB-${crypto.randomUUID()}`;
+
+  // 1. Créer la transaction en base de données en statut 'pending'
+  const transaction = await Transaction.create({
+    salonId: salon._id,
+    userId: req.user.id, // Assurez-vous que la route est protégée par un middleware d'authentification
+    montant,
+    devise: 'XAF', // Tranzak utilise souvent XAF au lieu de FCFA
+    reference,
+    type: 'abonnement',
+    plan: plan || 'basic',
+    dureeJours: dureeJours || 30,
+  });
+  console.log('transaction', transaction);
+
+  // 2. Récupérer le token Tranzak
+  const token = await getTranzakToken();
+
+  let paymentLink;
+
+  if (token === 'mock-token') {
+    // Mock payment mode
+    paymentLink = `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/payments/simulate-payment?ref=${reference}&salonId=${salonId}&returnUrl=${encodeURIComponent(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/dashboard/salon/${salonId}?payment=success`)}`;
+    transaction.tranzakRequestId = 'mock-' + crypto.randomUUID();
+    await transaction.save();
+  } else {
+    // 3. Créer la requête de paiement (Web Redirect) Tranzak
+    const tranzakResponse = await axios.post(
+      `${process.env.TRANZAK_API_BASE_URL || 'https://dsapi.tranzak.me'}/xp021/v1/request/create`,
+      {
+        amount: montant,
+        currencyCode: 'XAF',
+        description: `Abonnement au plan ${plan || 'Basic'} pour ${salon.name}`,
+        mchTransactionRef: reference,
+        returnUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/payments/verify?ref=${reference}&returnUrl=${encodeURIComponent(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?payment=success`)}`
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    console.log('tranzakResponse', tranzakResponse.data?.data?.links.paymentAuthUrl);
+
+    // Tranzak renvoie la structure: { data: { paymentAuthUrl: "...", requestId: "..." }, success: true }
+    paymentLink = tranzakResponse.data?.data?.links.paymentAuthUrl
+    console.log('paymentLink', paymentLink);
+    // Mettre à jour la transaction avec l'ID Tranzak
+    if (tranzakResponse.data?.data?.requestId) {
+      transaction.tranzakRequestId = tranzakResponse.data.data.requestId;
+      await transaction.save();
+      console.log('transaction', transaction);
+    }
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Paiement initié',
+    data: {
+      paymentLink,
+      transactionId: transaction._id,
+    }
+  });
+
+  // } catch (error) {
+  //   console.error('Erreur initiateSubscriptionPayment:', error);
+  //   res.status(500).json({ success: false, message: 'Erreur lors de l\'initiation du paiement' });
+  // }
 };
 
 /**

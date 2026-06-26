@@ -17,9 +17,17 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     match: [/^\S+@\S+\.\S+$/, 'Veuillez fournir un email valide'],
   },
+  googleId: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
   password: {
     type: String,
-    required: [true, 'Veuillez fournir un mot de passe'],
+    required: [
+      function() { return !this.googleId; },
+      'Veuillez fournir un mot de passe'
+    ],
     minlength: [6, 'Le mot de passe doit contenir au moins 6 caractères'],
     select: false, // Never returned in queries by default
   },
@@ -47,6 +55,10 @@ const userSchema = new mongoose.Schema({
   },
   derniereConnexion: {
     type: Date,
+  },
+  availability: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
   },
 }, { timestamps: true });
 

@@ -16,7 +16,7 @@ const app = express();
 app.use(helmet());
 app.use(cors({
 
-  origin: process.env.FRONTEND_URL || 'https://app.westdigitalhub.com',
+  origin: '*', //process.env.FRONTEND_URL || 'https://app.westdigitalhub.com',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   credentials: true,
 }
@@ -29,6 +29,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/api/auth', require('./routes/AuthRouter'));
 app.use('/api/marketplace', require('./routes/MarketplaceRouter'));
+app.post('/api/salons/onboard', protect, require('./controllers/SalonController').onboardSalon);
+app.post('/api/salons/link', protect, require('./controllers/SalonController').linkSalon);
 app.use('/api/salons/:salonId', require('./routes/salonRouter'));
 app.use('/api/admin', require('./routes/AdminRouter'));
 app.use('/api/payments', require('./routes/PaymentRouter'));

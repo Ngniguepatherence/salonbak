@@ -5,6 +5,8 @@ const { protect, authorize, belongsToSalon, requireActiveSubscription, checkPlan
 
 // Controllers spécifiques
 const {
+  onboardSalon,
+  linkSalon,
   getSalon,
   updateSalon,
   getStaff,
@@ -60,6 +62,10 @@ const prestationCtrl = createTenantController(Prestation);
 const typeCtrl = createTenantController(TypePrestation);
 const produitCtrl = createTenantController(Produit);
 const depenseCtrl = createTenantController(Depense, [{ path: 'creePar', select: 'name' }]);
+
+// ==================== ONBOARDING ====================
+router.post('/onboard', protect, onboardSalon);
+router.post('/link', protect, linkSalon);
 
 // ──────────────────────────────────────────────
 // Middlewares communs à toutes les routes salon

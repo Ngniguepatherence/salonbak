@@ -7,7 +7,8 @@ const {
   getSalons,
   getSalonBySlug,
   createBooking,
-  googleLogin
+  googleLogin,
+  getSalonAppointments
 } = require('../controllers/MarketplaceController');
 
 const { protectAppUser } = require('../middleware/auth');
@@ -21,6 +22,7 @@ router.get('/auth/me', protectAppUser, getMe);
 // Public browsing routes
 router.get('/salons', getSalons);
 router.get('/salons/:slug', getSalonBySlug);
+router.get('/salons/:slug/appointments', getSalonAppointments);
 
 // Protected action route
 router.post('/bookings', protectAppUser, createBooking);

@@ -90,17 +90,22 @@ exports.authorize = (...roles) => {
 exports.belongsToSalon = (req, res, next) => {
   const salonId = req.params.salonId;
 
+  console.log(`[belongsToSalon] URL: ${req.originalUrl} | Method: ${req.method} | Params salonId: ${salonId}`);
+  console.log(`[belongsToSalon] User role: ${req.user?.role} | User salonId: ${req.user?.salon?._id?.toString() || req.user?.salon?.toString()}`);
+
   if (req.user.role === 'admin') return next();
 
   const userSalonId = req.user.salon?._id?.toString() || req.user.salon?.toString();
 
   if (!userSalonId || userSalonId !== salonId) {
+    console.log(`[belongsToSalon] Access DENIED for salonId: ${salonId} vs userSalonId: ${userSalonId}`);
     return res.status(403).json({
       success: false,
       message: 'Accès refusé — vous n\'appartenez pas à ce salon',
     });
   }
 
+  console.log(`[belongsToSalon] Access GRANTED`);
   next();
 };
 

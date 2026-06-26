@@ -158,7 +158,8 @@ exports.getSalonBySlug = async (req, res) => {
       nom: member.name,
       role: member.role === 'owner' ? 'Propriétaire' : 'Staff',
       photoUrl: member.avatarUrl || null,
-      specialties: []
+      specialties: [],
+      availability: member.availability || null
     }));
 
     res.status(200).json({ success: true, data: { ...salon.toObject(), prestations, staff } });
@@ -170,7 +171,7 @@ exports.getSalonBySlug = async (req, res) => {
 // 6. Bookings: Create a new booking
 exports.createBooking = async (req, res) => {
   try {
-    const { salonId, typePrestationId, date, heure, notes, telephoneClient, nomClient } = req.body;
+    const { salonId, typePrestationId, date, heure, notes, telephoneClient, nomClient, employe } = req.body;
 
     const salon = await Salon.findById(salonId);
     if (!salon) return res.status(404).json({ success: false, message: 'Salon introuvable' });
@@ -207,12 +208,104 @@ exports.createBooking = async (req, res) => {
       }
     }
 
+    // Validation des disponibilités et attribution de l'employé
+    const timeToMinutes = (t) => {
+      if (!t) return 0;
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+
+    const dateObj = new Date(date);
+    const dayOfWeek = String(dateObj.getDay()); // "0" = Dimanche, "1" = Lundi, etc.
+
+    const slotDuration = prestation.duree || 30;
+    const bookingStartMin = timeToMinutes(heure);
+    const bookingEndMin = bookingStartMin + slotDuration;
+
+    // Récupérer les collaborateurs actifs du salon (staff + owner)
+    const team = await User.find({ salon: salon._id, actif: true, role: { $in: ['staff', 'owner'] } });
+
+    // Récupérer les rendez-vous existants de la journée pour vérifier les chevauchements
+    const dayBookings = await Rendezvous.find({
+      salon: salon._id,
+      date,
+      statut: { $ne: 'annule' }
+    });
+
+    let assignedEmployeId = null;
+
+    if (employe) {
+      // Vérifier que le collaborateur sélectionné existe et appartient au salon
+      const chosenStaff = team.find(member => member._id.toString() === employe.toString());
+      if (!chosenStaff) {
+        return res.status(400).json({ success: false, message: 'Collaborateur sélectionné introuvable.' });
+      }
+
+      // Vérifier si le collaborateur travaille ce jour-là
+      const memberAvailability = chosenStaff.availability || salon.availability || null;
+      if (memberAvailability && memberAvailability[dayOfWeek]) {
+        const daySched = memberAvailability[dayOfWeek];
+        if (!daySched.open) {
+          return res.status(400).json({ success: false, message: 'Le collaborateur sélectionné ne travaille pas ce jour.' });
+        }
+        const startMin = timeToMinutes(daySched.start || '08:00');
+        const endMin = timeToMinutes(daySched.end || '19:00');
+        if (bookingStartMin < startMin || bookingEndMin > endMin) {
+          return res.status(400).json({ success: false, message: 'Créneau en dehors des horaires de travail du collaborateur.' });
+        }
+      }
+
+      // Vérifier si le collaborateur a déjà un rendez-vous sur cette plage
+      const hasOverlap = dayBookings.some(appt => {
+        if (!appt.employe || appt.employe.toString() !== chosenStaff._id.toString()) return false;
+        const apptStartMin = timeToMinutes(appt.heure);
+        const apptEndMin = apptStartMin + (appt.duree || 30);
+        return bookingStartMin < apptEndMin && bookingEndMin > apptStartMin;
+      });
+
+      if (hasOverlap) {
+        return res.status(400).json({ success: false, message: 'Le collaborateur sélectionné est déjà occupé à ce créneau.' });
+      }
+
+      assignedEmployeId = chosenStaff._id;
+    } else {
+      // "Sans préférence" -> Trouver le premier disponible
+      const availableStaff = team.filter(member => {
+        // 1. Vérifier si le collaborateur travaille ce jour-là
+        const memberAvailability = member.availability || salon.availability || null;
+        if (memberAvailability && memberAvailability[dayOfWeek]) {
+          const daySched = memberAvailability[dayOfWeek];
+          if (!daySched.open) return false;
+          const startMin = timeToMinutes(daySched.start || '08:00');
+          const endMin = timeToMinutes(daySched.end || '19:00');
+          if (bookingStartMin < startMin || bookingEndMin > endMin) return false;
+        }
+
+        // 2. Vérifier les chevauchements
+        const hasOverlap = dayBookings.some(appt => {
+          if (!appt.employe || appt.employe.toString() !== member._id.toString()) return false;
+          const apptStartMin = timeToMinutes(appt.heure);
+          const apptEndMin = apptStartMin + (appt.duree || 30);
+          return bookingStartMin < apptEndMin && bookingEndMin > apptStartMin;
+        });
+
+        return !hasOverlap;
+      });
+
+      if (availableStaff.length === 0) {
+        return res.status(400).json({ success: false, message: 'Aucun collaborateur n\'est disponible à ce créneau.' });
+      }
+
+      // Assigner automatiquement le premier disponible
+      assignedEmployeId = availableStaff[0]._id;
+    }
+
     // Create Rendezvous
     const rendezVous = await Rendezvous.create({
       salon: salon._id,
       client: client._id,
       typePrestation: typePrestationId,
-      employe: null,
+      employe: assignedEmployeId,
       date,
       heure,
       duree: prestation.duree || 30,
@@ -232,6 +325,34 @@ exports.createBooking = async (req, res) => {
     }
 
     res.status(201).json({ success: true, data: rendezVous });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 7. Bookings: Get appointments/busy slots for a day
+exports.getSalonAppointments = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { date } = req.query; // YYYY-MM-DD
+
+    if (!date) {
+      return res.status(400).json({ success: false, message: 'La date est requise (YYYY-MM-DD)' });
+    }
+
+    const salon = await Salon.findOne({ slug, isActive: true });
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable' });
+    }
+
+    // Récupérer tous les rendez-vous du salon à cette date qui ne sont pas annulés
+    const appointments = await Rendezvous.find({
+      salon: salon._id,
+      date,
+      statut: { $ne: 'annule' }
+    }).select('heure duree employe');
+
+    res.status(200).json({ success: true, data: appointments });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

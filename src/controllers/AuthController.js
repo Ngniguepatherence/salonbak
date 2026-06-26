@@ -1,10 +1,16 @@
 const User = require('../models/User');
 const Salon = require('../models/Salon');
+const { OAuth2Client } = require('google-auth-library');
+const client = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID || 'dummy_client_id_for_dev',
+  process.env.GOOGLE_CLIENT_SECRET || 'dummy_client_secret_for_dev',
+  process.env.GOOGLE_REDIRECT_URI || `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/auth/google/callback`
+);
 
 /**
  * Construit la réponse de session à renvoyer au frontend
  */
-function buildSessionResponse(user, salon, token) {
+const buildSessionResponse = (user, salon, token) => {
   const permissions = {
     owner: [
       'clients:read', 'clients:write', 'clients:delete',
@@ -47,7 +53,9 @@ function buildSessionResponse(user, salon, token) {
       expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
     },
   };
-}
+};
+
+exports.buildSessionResponse = buildSessionResponse;
 
 // @desc    Login
 // @route   POST /api/auth/login
@@ -55,8 +63,8 @@ function buildSessionResponse(user, salon, token) {
 exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    
-   
+
+
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
     }
@@ -68,7 +76,7 @@ exports.login = async (req, res, next) => {
     if (!user) {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
     }
-    
+
 
 
     const isMatch = await user.matchPassword(password);
@@ -79,7 +87,7 @@ exports.login = async (req, res, next) => {
     if (!user.actif) {
       return res.status(403).json({ success: false, message: 'Compte désactivé' });
     }
-     
+
     // Vérification abonnement pour owner/staff
     if (user.role !== 'admin' && user.salon) {
       const salon = user.salon;
@@ -90,12 +98,12 @@ exports.login = async (req, res, next) => {
         });
       }
     }
-    
+
     // Mise à jour de la dernière connexion
     user.derniereConnexion = new Date();
     console.log('Tentative de login pour email:', email);
     await user.save();
-    
+
     const token = user.getSignedJwtToken();
     const salon = user.role === 'admin' ? null : user.salon;
     console.log('Login réussi pour email:', salon ? `${email} (Salon: ${salon.name})` : email);
@@ -104,8 +112,8 @@ exports.login = async (req, res, next) => {
       ...buildSessionResponse(user, salon, token),
     });
   } catch (err) {
-   console.error('Erreur lors du login:', err);
-   next(err);
+    console.error('Erreur lors du login:', err);
+    next(err);
   }
 };
 
@@ -198,6 +206,189 @@ exports.updatePassword = async (req, res, next) => {
     const token = user.getSignedJwtToken();
     res.status(200).json({ success: true, token });
   } catch (err) {
+    next(err);
+  }
+}
+// @desc    Initiate Google OAuth Flow
+// @route   GET /api/auth/google
+// @access  Public
+exports.initiateGoogleAuth = (req, res, next) => {
+  try {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectParam = req.query.redirect || '';
+    
+    // Si pas de vrai CLIENT_ID en dev, ou s'il s'agit d'un secret, on utilise le mock direct
+    const isMock = !clientId || 
+                   clientId === 'dummy_client_id_for_dev' || 
+                   clientId.startsWith('GOCSPX-') || 
+                   !clientId.includes('.apps.googleusercontent.com');
+
+    if (isMock) {
+      console.warn('⚠️ Google Client ID non configuré ou invalide (détecté comme clé secrète). Utilisation du mock en dev.');
+      return res.redirect(`/api/auth/google/callback?code=mock_dev_code&state=${encodeURIComponent(redirectParam)}`);
+    }
+
+    const url = client.generateAuthUrl({
+      access_type: 'offline',
+      scope: ['profile', 'email'],
+      state: redirectParam
+    });
+
+    res.redirect(url);
+  } catch (err) {
+    next(err);
+  }
+};
+
+
+// @desc    Google OAuth Callback
+// @route   GET /api/auth/google/callback
+// @access  Public
+exports.googleAuthCallback = async (req, res, next) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+  const { code, state } = req.query;
+  const targetRedirectUrl = state || `${frontendUrl}/pro/onboarding`;
+
+  try {
+    if (!code) {
+      const separator = targetRedirectUrl.includes('?') ? '&' : '?';
+      return res.redirect(`${targetRedirectUrl}${separator}error=no_code`);
+    }
+
+    let payload;
+
+    if (code === 'mock_dev_code') {
+      // MOCK DEV FLOW
+      payload = {
+        email: 'test-pro@example.com',
+        name: 'Pro Testeur',
+        sub: 'mock_google_id_12345',
+        picture: 'https://ui-avatars.com/api/?name=Pro+Testeur'
+      };
+    } else {
+      // REAL GOOGLE FLOW
+      const { tokens } = await client.getToken(code);
+      const ticket = await client.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    }
+
+    const { email, name, sub: googleId, picture } = payload;
+    let user = await User.findOne({ email }).populate('salon');
+
+    if (!user) {
+      user = await User.create({
+        name,
+        email,
+        googleId,
+        avatarUrl: picture,
+        role: 'owner',
+        actif: true,
+      });
+    } else {
+      let updated = false;
+      if (!user.googleId) {
+        user.googleId = googleId;
+        updated = true;
+      }
+      if (!user.avatarUrl && picture) {
+        user.avatarUrl = picture;
+        updated = true;
+      }
+      if (updated) await user.save();
+    }
+
+    user.derniereConnexion = new Date();
+    await user.save();
+
+    const jwtToken = user.getSignedJwtToken();
+    const salonExists = user.salon ? 'true' : 'false';
+
+    // Redirect to frontend with token
+    const separator = targetRedirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${targetRedirectUrl}${separator}token=${jwtToken}&salonExists=${salonExists}`);
+
+  } catch (err) {
+    console.error('Erreur google callback:', err);
+    const separator = targetRedirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${targetRedirectUrl}${separator}error=auth_failed`);
+  }
+};
+
+// @desc    Google Token Login (POST /api/auth/google)
+// @route   POST /api/auth/google
+// @access  Public
+exports.googleTokenLogin = async (req, res, next) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ success: false, message: 'Google token required' });
+    }
+
+    let payload;
+
+    if (token.startsWith('mock-') || token === 'mock_dev_code') {
+      // MOCK DEV FLOW
+      payload = {
+        email: 'test-pro@example.com',
+        name: 'Pro Testeur',
+        sub: 'mock_google_id_12345',
+        picture: 'https://ui-avatars.com/api/?name=Pro+Testeur'
+      };
+    } else {
+      // REAL GOOGLE FLOW
+      try {
+        const ticket = await client.verifyIdToken({
+          idToken: token,
+          audience: process.env.GOOGLE_CLIENT_ID || 'dummy_client_id_for_dev',
+        });
+        payload = ticket.getPayload();
+      } catch (err) {
+        return res.status(401).json({ success: false, message: 'Token Google invalide' });
+      }
+    }
+
+    const { email, name, sub: googleId, picture } = payload;
+    let user = await User.findOne({ email }).populate('salon');
+
+    if (!user) {
+      user = await User.create({
+        name,
+        email,
+        googleId,
+        avatarUrl: picture,
+        role: 'owner',
+        actif: true,
+      });
+    } else {
+      let updated = false;
+      if (!user.googleId) {
+        user.googleId = googleId;
+        updated = true;
+      }
+      if (!user.avatarUrl && picture) {
+        user.avatarUrl = picture;
+        updated = true;
+      }
+      if (updated) await user.save();
+    }
+
+    user.derniereConnexion = new Date();
+    await user.save();
+
+    const jwtToken = user.getSignedJwtToken();
+    const salon = user.role === 'admin' ? null : user.salon;
+
+    res.status(200).json({
+      success: true,
+      ...buildSessionResponse(user, salon, jwtToken),
+    });
+
+  } catch (err) {
+    console.error('Erreur googleTokenLogin:', err);
     next(err);
   }
 };
