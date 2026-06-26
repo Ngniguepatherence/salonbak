@@ -5,6 +5,14 @@ const Rendezvous = require('../models/Rendezvous');
 const TypePrestation = require('../models/TypePrestation');
 const User = require('../models/User');
 
+const { OAuth2Client } = require('google-auth-library');
+const googleMarketplaceClient = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID || 'dummy_client_id_for_dev',
+  process.env.GOOGLE_CLIENT_SECRET || 'dummy_client_secret_for_dev',
+  process.env.GOOGLE_REDIRECT_URI_MARKETPLACE || `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/auth/google/callback`
+);
+
+
 // 1. Auth: Register
 exports.register = async (req, res) => {
   try {
@@ -66,7 +74,6 @@ exports.getMe = async (req, res) => {
 };
 
 // 3.1 Auth: Google Login
-const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID || 'dummy');
 
 exports.googleLogin = async (req, res) => {
@@ -119,6 +126,153 @@ exports.googleLogin = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// 3.1.2 Auth: Initiate Google OAuth Redirection for Marketplace AppUser
+exports.initiateGoogleAuth = (req, res, next) => {
+  try {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectParam = req.query.redirect || '';
+
+    // Check if mock flow is needed (like in development or if client ID isn't configured)
+    const isMock = !clientId ||
+      clientId === 'dummy_client_id_for_dev' ||
+      clientId.startsWith('GOCSPX-') ||
+      !clientId.includes('.apps.googleusercontent.com');
+
+    if (isMock) {
+      console.warn('⚠️ Google Client ID non configuré ou invalide. Utilisation du mock en dev pour le marketplace.');
+      return res.redirect(`/api/marketplace/auth/google/callback?code=mock_dev_code&state=${encodeURIComponent(redirectParam)}`);
+    }
+
+    const url = googleMarketplaceClient.generateAuthUrl({
+      access_type: 'offline',
+      scope: ['profile', 'email'],
+      state: redirectParam
+    });
+
+    res.redirect(url);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// 3.1.3 Auth: Google OAuth Callback for Marketplace AppUser
+exports.googleAuthCallback = async (req, res, next) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+  const { code, state } = req.query;
+  const targetRedirectUrl = state || `${frontendUrl}/explorer/login`;
+
+  try {
+    if (!code) {
+      const separator = targetRedirectUrl.includes('?') ? '&' : '?';
+      return res.redirect(`${targetRedirectUrl}${separator}error=no_code`);
+    }
+
+    let payload;
+
+    if (code === 'mock_dev_code') {
+      payload = {
+        email: 'test-client-google@example.com',
+        name: 'Client Google',
+        sub: 'mock_google_id_99999',
+        picture: 'https://ui-avatars.com/api/?name=Client+Google&background=0D8ABC&color=fff'
+      };
+    } else {
+      const { tokens } = await googleMarketplaceClient.getToken(code);
+      const ticket = await googleMarketplaceClient.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    }
+
+    const { email, name, picture } = payload;
+    let user = await AppUser.findOne({ email });
+
+    if (!user) {
+      const crypto = require('crypto');
+      const randomPassword = crypto.randomBytes(16).toString('hex');
+
+      user = await AppUser.create({
+        nom: name,
+        email: email,
+        password: randomPassword,
+        avatarUrl: picture,
+        actif: true
+      });
+    } else {
+      user.derniereConnexion = new Date();
+      if (!user.avatarUrl && picture) {
+        user.avatarUrl = picture;
+      }
+      await user.save();
+    }
+
+    const jwtToken = user.getSignedJwtToken();
+
+    // Redirect to frontend with token parameter
+    const separator = targetRedirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${targetRedirectUrl}${separator}token=${jwtToken}`);
+
+  } catch (err) {
+    console.error('Erreur google marketplace callback:', err);
+    const separator = targetRedirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${targetRedirectUrl}${separator}error=auth_failed`);
+  }
+};
+
+
+// 3.2 Auth: Update Profile
+exports.updateProfile = async (req, res) => {
+  try {
+    const { nom, telephone, avatarUrl } = req.body;
+    const user = await AppUser.findById(req.appUser.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+    }
+
+    if (nom) user.nom = nom;
+    if (telephone !== undefined) user.telephone = telephone;
+    if (avatarUrl !== undefined) user.avatarUrl = avatarUrl;
+
+    await user.save();
+    res.status(200).json({ success: true, user });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 3.3 Auth: Toggle Favorite
+exports.toggleFavorite = async (req, res) => {
+  try {
+    const { salonId } = req.body;
+    if (!salonId) {
+      return res.status(400).json({ success: false, message: 'ID du salon requis' });
+    }
+
+    const user = await AppUser.findById(req.appUser.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+    }
+
+    user.favoris = user.favoris || [];
+    const exists = user.favoris.some(id => id && id.toString() === salonId.toString());
+    if (exists) {
+      user.favoris = user.favoris.filter(id => id && id.toString() !== salonId.toString());
+    } else {
+      user.favoris.push(salonId);
+    }
+
+    await user.save();
+
+    // Populate favoris to return the updated user with populated fields
+    const updatedUser = await AppUser.findById(req.appUser.id).populate('favoris', 'name slug address logoUrl typeEtablissement');
+    res.status(200).json({ success: true, user: updatedUser });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 
 // 4. Salons: List
 exports.getSalons = async (req, res) => {

@@ -276,6 +276,38 @@ exports.googleAuthCallback = async (req, res, next) => {
     }
 
     const { email, name, sub: googleId, picture } = payload;
+    
+    // Detect if this is a marketplace user request
+    const isMarketplace = targetRedirectUrl.includes('/explorer') || targetRedirectUrl.includes('/booking');
+
+    if (isMarketplace) {
+      const AppUser = require('../models/AppUser');
+      let appUser = await AppUser.findOne({ email });
+
+      if (!appUser) {
+        const crypto = require('crypto');
+        const randomPassword = crypto.randomBytes(16).toString('hex');
+
+        appUser = await AppUser.create({
+          nom: name,
+          email: email,
+          password: randomPassword,
+          avatarUrl: picture,
+          actif: true
+        });
+      } else {
+        appUser.derniereConnexion = new Date();
+        if (!appUser.avatarUrl && picture) {
+          appUser.avatarUrl = picture;
+        }
+        await appUser.save();
+      }
+
+      const jwtToken = appUser.getSignedJwtToken();
+      const separator = targetRedirectUrl.includes('?') ? '&' : '?';
+      return res.redirect(`${targetRedirectUrl}${separator}token=${jwtToken}`);
+    }
+
     let user = await User.findOne({ email }).populate('salon');
 
     if (!user) {

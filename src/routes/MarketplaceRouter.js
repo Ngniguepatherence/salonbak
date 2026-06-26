@@ -8,7 +8,11 @@ const {
   getSalonBySlug,
   createBooking,
   googleLogin,
-  getSalonAppointments
+  getSalonAppointments,
+  updateProfile,
+  toggleFavorite,
+  initiateGoogleAuth,
+  googleAuthCallback
 } = require('../controllers/MarketplaceController');
 
 const { protectAppUser } = require('../middleware/auth');
@@ -16,8 +20,13 @@ const { protectAppUser } = require('../middleware/auth');
 // Auth routes for marketplace
 router.post('/auth/register', register);
 router.post('/auth/login', login);
+router.get('/auth/google', initiateGoogleAuth);
+router.get('/auth/google/callback', googleAuthCallback);
 router.post('/auth/google', googleLogin);
 router.get('/auth/me', protectAppUser, getMe);
+router.put('/auth/profile', protectAppUser, updateProfile);
+router.post('/auth/favorites/toggle', protectAppUser, toggleFavorite);
+
 
 // Public browsing routes
 router.get('/salons', getSalons);
