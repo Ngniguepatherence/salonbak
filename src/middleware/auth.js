@@ -27,6 +27,10 @@ exports.protect = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Compte désactivé' });
     }
 
+    if (user.salon) {
+      await user.salon.checkSubscriptionTransition();
+    }
+
     req.user = user;
     next();
   } catch (err) {
@@ -47,7 +51,7 @@ exports.protectAppUser = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const AppUser = require('../models/AppUser');
     const user = await AppUser.findById(decoded.id);
 

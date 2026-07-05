@@ -1,5 +1,6 @@
 const Client = require('../models/Client');
 const createTenantController = require('./TenantController');
+const { escapeRegex } = require('../utils/security');
 
 const baseCtrl = createTenantController(Client);
 
@@ -13,10 +14,11 @@ const clientController = {
         return res.status(200).json({ success: true, data: [] });
       }
       
-      // Recherche par nom (partielle, insensible à la casse)
+      // Recherche par nom (partielle, insensible à la casse, protégée contre injection regex)
+      const safeQ = escapeRegex(q).slice(0, 100);
       const clients = await Client.find({
         salon: req.params.salonId,
-        nom: { $regex: q, $options: 'i' }
+        nom: { $regex: safeQ, $options: 'i' }
       }).limit(10);
       
       res.status(200).json({ success: true, data: clients });
@@ -30,6 +32,10 @@ const clientController = {
       const { clients } = req.body;
       if (!clients || !Array.isArray(clients)) {
         return res.status(400).json({ success: false, message: 'Données invalides : tableau de clients attendu' });
+      }
+
+      if (clients.length > 500) {
+        return res.status(400).json({ success: false, message: 'Trop de clients en une fois (max 500)' });
       }
 
       const salonId = req.params.salonId;
@@ -85,6 +91,10 @@ const clientController = {
       const { contacts, groupe } = req.body;
       if (!contacts || !Array.isArray(contacts)) {
         return res.status(400).json({ success: false, message: 'Données invalides : tableau de contacts attendu' });
+      }
+
+      if (contacts.length > 500) {
+        return res.status(400).json({ success: false, message: 'Trop de contacts en une fois (max 500)' });
       }
 
       const salonId = req.params.salonId;

@@ -77,17 +77,18 @@ exports.updateSalonStatus = async (req, res, next) => {
     }
 
     if (plan !== undefined) {
-      const { PLANS } = require('../config/plans');
+      const { getPlan } = require('../config/plans');
+      const selectedPlan = await getPlan(plan);
       salon.plan = plan;
-      const config = PLANS[plan] || PLANS.basic;
       salon.limits = {
-        maxCustomers: config.maxCustomers,
-        maxStaff: config.maxStaff,
-        maxRendezvous: config.maxRendezvous,
-        maxCampaignsPerMonth: config.maxCampaignsPerMonth,
-        exportEnabled: config.exportEnabled,
-        campaignsEnabled: config.campaignsEnabled,
+        maxCustomers: selectedPlan.maxCustomers !== undefined ? selectedPlan.maxCustomers : -1,
+        maxStaff: selectedPlan.maxStaff !== undefined ? selectedPlan.maxStaff : -1,
+        maxRendezvous: selectedPlan.maxRendezvous !== undefined ? selectedPlan.maxRendezvous : -1,
+        maxCampaignsPerMonth: selectedPlan.maxCampaignsPerMonth !== undefined ? selectedPlan.maxCampaignsPerMonth : -1,
+        exportEnabled: selectedPlan.exportEnabled || false,
+        campaignsEnabled: selectedPlan.campaignsEnabled || false,
       };
+      salon.abonnement.montant = selectedPlan.price;
     }
 
     if (abonnement !== undefined && typeof abonnement === 'object') {
@@ -144,8 +145,9 @@ exports.createSalon = async (req, res, next) => {
     });
 
     // 3. Create the salon
-    const { PLANS } = require('../config/plans');
-    const config = PLANS[plan || 'basic'] || PLANS.basic;
+    const { getPlan } = require('../config/plans');
+    const selectedPlan = await getPlan(plan || 'basic');
+    const trialDays = selectedPlan.trialDurationDays || 14;
 
     const salon = await Salon.create({
       name: salonName,
@@ -156,17 +158,19 @@ exports.createSalon = async (req, res, next) => {
       plan: plan || 'basic',
       isActive: true,
       limits: {
-        maxCustomers: config.maxCustomers,
-        maxStaff: config.maxStaff,
-        maxRendezvous: config.maxRendezvous,
-        maxCampaignsPerMonth: config.maxCampaignsPerMonth,
-        exportEnabled: config.exportEnabled,
-        campaignsEnabled: config.campaignsEnabled,
+        maxCustomers: selectedPlan.maxCustomers !== undefined ? selectedPlan.maxCustomers : 300,
+        maxStaff: selectedPlan.maxStaff !== undefined ? selectedPlan.maxStaff : 2,
+        maxRendezvous: selectedPlan.maxRendezvous !== undefined ? selectedPlan.maxRendezvous : 100,
+        maxCampaignsPerMonth: selectedPlan.maxCampaignsPerMonth !== undefined ? selectedPlan.maxCampaignsPerMonth : 0,
+        exportEnabled: selectedPlan.exportEnabled || false,
+        campaignsEnabled: selectedPlan.campaignsEnabled || false,
       },
       abonnement: {
         statut: 'essai',
         dateDebut: Date.now(),
-        dateFin: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days trial
+        dateFin: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
+        montant: selectedPlan.price || 5000,
+        renouvellementAuto: false
       }
     });
 

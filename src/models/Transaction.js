@@ -24,7 +24,7 @@ const transactionSchema = new mongoose.Schema({
     required: [true, 'La référence interne est requise'],
     unique: true,
   },
-  tranzakRequestId: {
+  pawapayDepositId: {
     type: String,
   },
   statut: {
@@ -37,12 +37,12 @@ const transactionSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['abonnement'],
+    enum: ['abonnement', 'reservation'],
     default: 'abonnement',
   },
   plan: {
     type: String,
-    enum: ['basic', 'pro', 'premium'],
+    enum: ['basic', 'pro', 'premium', 'reservation'],
     default: 'basic',
   },
   dureeJours: {

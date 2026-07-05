@@ -4,6 +4,7 @@ const Client = require('../models/Client');
 const Rendezvous = require('../models/Rendezvous');
 const TypePrestation = require('../models/TypePrestation');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 
 const { OAuth2Client } = require('google-auth-library');
 const googleMarketplaceClient = new OAuth2Client(
@@ -11,8 +12,15 @@ const googleMarketplaceClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_SECRET || 'dummy_client_secret_for_dev',
   process.env.GOOGLE_REDIRECT_URI_MARKETPLACE || `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/auth/google/callback`
 );
+const { isSafeRedirect } = require('../utils/security');
 
-
+const sendErrorResponse = (res, error) => {
+  console.error(error);
+  res.status(500).json({
+    success: false,
+    message: process.env.NODE_ENV === 'production' ? 'Erreur interne du serveur' : error.message
+  });
+};
 // 1. Auth: Register
 exports.register = async (req, res) => {
   try {
@@ -27,9 +35,13 @@ exports.register = async (req, res) => {
     const user = await AppUser.create({ nom, email, password, telephone });
     const token = user.getSignedJwtToken();
 
-    res.status(201).json({ success: true, token, user });
+    // Populate empty favorites for correct format
+    const populatedUser = await AppUser.findById(user._id).populate('favoris', 'name slug address logoUrl bannerUrl galleryUrls typeEtablissement');
+    populatedUser.password = undefined;
+
+    res.status(201).json({ success: true, token, user: populatedUser });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
   }
 };
 
@@ -54,22 +66,25 @@ exports.login = async (req, res) => {
     user.derniereConnexion = new Date();
     await user.save();
 
-    const token = user.getSignedJwtToken();
-    user.password = undefined; // hide password in response
+    // Populate favoris after saving to return the updated user with populated fields
+    const populatedUser = await AppUser.findById(user._id).populate('favoris', 'name slug address logoUrl bannerUrl galleryUrls typeEtablissement');
+    populatedUser.password = undefined; // hide password in response
 
-    res.status(200).json({ success: true, token, user });
+    const token = user.getSignedJwtToken();
+
+    res.status(200).json({ success: true, token, user: populatedUser });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
   }
 };
 
 // 3. Auth: Get Me
 exports.getMe = async (req, res) => {
   try {
-    const user = await AppUser.findById(req.appUser.id).populate('favoris', 'name slug address logoUrl typeEtablissement');
+    const user = await AppUser.findById(req.appUser.id).populate('favoris', 'name slug address logoUrl bannerUrl galleryUrls typeEtablissement');
     res.status(200).json({ success: true, user });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
   }
 };
 
@@ -119,11 +134,14 @@ exports.googleLogin = async (req, res) => {
     }
 
     const jwtToken = user.getSignedJwtToken();
-    user.password = undefined;
+    
+    // Populate favoris to return the updated user with populated fields
+    const populatedUser = await AppUser.findById(user._id).populate('favoris', 'name slug address logoUrl bannerUrl galleryUrls typeEtablissement');
+    populatedUser.password = undefined;
 
-    res.status(200).json({ success: true, token: jwtToken, user });
+    res.status(200).json({ success: true, token: jwtToken, user: populatedUser });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
   }
 };
 
@@ -152,7 +170,7 @@ exports.initiateGoogleAuth = (req, res, next) => {
 
     res.redirect(url);
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    sendErrorResponse(res, err);
   }
 };
 
@@ -163,9 +181,12 @@ exports.googleAuthCallback = async (req, res, next) => {
   const targetRedirectUrl = state || `${frontendUrl}/explorer/login`;
 
   try {
+    const defaultUrl = `${frontendUrl}/explorer/login`;
+    const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
+
     if (!code) {
-      const separator = targetRedirectUrl.includes('?') ? '&' : '?';
-      return res.redirect(`${targetRedirectUrl}${separator}error=no_code`);
+      const separator = safeRedirectUrl.includes('?') ? '&' : '?';
+      return res.redirect(`${safeRedirectUrl}${separator}error=no_code`);
     }
 
     let payload;
@@ -173,9 +194,9 @@ exports.googleAuthCallback = async (req, res, next) => {
     if (code === 'mock_dev_code') {
       payload = {
         email: 'test-client-google@example.com',
-        name: 'Client Google',
-        sub: 'mock_google_id_99999',
-        picture: 'https://ui-avatars.com/api/?name=Client+Google&background=0D8ABC&color=fff'
+        name: 'Utilisateur Google',
+        picture: 'https://ui-avatars.com/api/?name=Google+User&background=0D8ABC&color=fff',
+        sub: 'mock_google_marketplace_12345'
       };
     } else {
       const { tokens } = await googleMarketplaceClient.getToken(code);
@@ -198,7 +219,6 @@ exports.googleAuthCallback = async (req, res, next) => {
         email: email,
         password: randomPassword,
         avatarUrl: picture,
-        actif: true
       });
     } else {
       user.derniereConnexion = new Date();
@@ -211,13 +231,15 @@ exports.googleAuthCallback = async (req, res, next) => {
     const jwtToken = user.getSignedJwtToken();
 
     // Redirect to frontend with token parameter
-    const separator = targetRedirectUrl.includes('?') ? '&' : '?';
-    res.redirect(`${targetRedirectUrl}${separator}token=${jwtToken}`);
+    const separator = safeRedirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${safeRedirectUrl}${separator}token=${jwtToken}`);
 
   } catch (err) {
     console.error('Erreur google marketplace callback:', err);
-    const separator = targetRedirectUrl.includes('?') ? '&' : '?';
-    res.redirect(`${targetRedirectUrl}${separator}error=auth_failed`);
+    const defaultUrl = `${frontendUrl}/explorer/login`;
+    const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
+    const separator = safeRedirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${safeRedirectUrl}${separator}error=auth_failed`);
   }
 };
 
@@ -236,9 +258,13 @@ exports.updateProfile = async (req, res) => {
     if (avatarUrl !== undefined) user.avatarUrl = avatarUrl;
 
     await user.save();
-    res.status(200).json({ success: true, user });
+    
+    // Populate favoris to return the updated user with populated fields
+    const populatedUser = await AppUser.findById(req.appUser.id).populate('favoris', 'name slug address logoUrl bannerUrl galleryUrls typeEtablissement');
+    
+    res.status(200).json({ success: true, user: populatedUser });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
   }
 };
 
@@ -265,11 +291,11 @@ exports.toggleFavorite = async (req, res) => {
 
     await user.save();
 
-    // Populate favoris to return the updated user with populated fields
-    const updatedUser = await AppUser.findById(req.appUser.id).populate('favoris', 'name slug address logoUrl typeEtablissement');
+    // Populate favoris with bannerUrl and galleryUrls as well
+    const updatedUser = await AppUser.findById(req.appUser.id).populate('favoris', 'name slug address logoUrl bannerUrl galleryUrls typeEtablissement');
     res.status(200).json({ success: true, user: updatedUser });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
   }
 };
 
@@ -284,7 +310,7 @@ exports.getSalons = async (req, res) => {
     // We can map these so the frontend receives them in the expected format
     res.status(200).json({ success: true, data: salons });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
   }
 };
 
@@ -302,6 +328,8 @@ exports.getSalonBySlug = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Salon introuvable' });
     }
 
+    await salon.checkSubscriptionTransition();
+
     // Fetch prestations for this salon
     const prestations = await TypePrestation.find({ salon: salon._id, actif: true });
 
@@ -318,7 +346,7 @@ exports.getSalonBySlug = async (req, res) => {
 
     res.status(200).json({ success: true, data: { ...salon.toObject(), prestations, staff } });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
   }
 };
 
@@ -329,6 +357,8 @@ exports.createBooking = async (req, res) => {
 
     const salon = await Salon.findById(salonId);
     if (!salon) return res.status(404).json({ success: false, message: 'Salon introuvable' });
+
+    await salon.checkSubscriptionTransition();
 
     const prestation = await TypePrestation.findById(typePrestationId);
     if (!prestation) return res.status(404).json({ success: false, message: 'Prestation introuvable' });
@@ -478,9 +508,37 @@ exports.createBooking = async (req, res) => {
       await req.appUser.save();
     }
 
+    // Créer des notifications pour le propriétaire et l'employé assigné
+    try {
+      const notifData = {
+        salon: salon._id,
+        type: 'booking',
+        title: 'Nouveau rendez-vous en ligne',
+        description: `Le client ${client.nom || 'Client App'} a réservé pour la prestation "${prestation.name}" le ${date} à ${heure}.`
+      };
+
+      // 1. Notifier le Owner
+      if (salon.owner) {
+        await Notification.create({
+          ...notifData,
+          user: salon.owner
+        });
+      }
+
+      // 2. Notifier l'employé (si différent de l'owner)
+      if (assignedEmployeId && assignedEmployeId.toString() !== (salon.owner ? salon.owner.toString() : '')) {
+        await Notification.create({
+          ...notifData,
+          user: assignedEmployeId
+        });
+      }
+    } catch (notifErr) {
+      console.error('⚠️ Impossible de créer les notifications de rendez-vous:', notifErr.message);
+    }
+
     res.status(201).json({ success: true, data: rendezVous });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
   }
 };
 
@@ -494,7 +552,11 @@ exports.getSalonAppointments = async (req, res) => {
       return res.status(400).json({ success: false, message: 'La date est requise (YYYY-MM-DD)' });
     }
 
-    const salon = await Salon.findOne({ slug, isActive: true });
+    const isObjectId = slug.match(/^[0-9a-fA-F]{24}$/);
+    const query = isObjectId ? { _id: slug } : { slug: slug };
+    query.isActive = true;
+
+    const salon = await Salon.findOne(query);
     if (!salon) {
       return res.status(404).json({ success: false, message: 'Salon introuvable' });
     }
@@ -508,6 +570,71 @@ exports.getSalonAppointments = async (req, res) => {
 
     res.status(200).json({ success: true, data: appointments });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendErrorResponse(res, error);
+  }
+};
+
+// 5.1 Salons: Get Share Preview (Open Graph metadata for crawlers)
+exports.getSalonSharePreview = async (req, res) => {
+  try {
+    const slug = req.params.slug;
+    const isObjectId = slug.match(/^[0-9a-fA-F]{24}$/);
+
+    const query = isObjectId ? { _id: slug } : { slug: slug };
+    query.isActive = true;
+
+    const salon = await Salon.findOne(query);
+    if (!salon) {
+      return res.status(404).send('Salon introuvable');
+    }
+
+    const salonName = salon.name || 'Salon';
+    const description = salon.description || `Réservez votre prochain rendez-vous chez ${salonName}`;
+    const bannerUrl = salon.bannerUrl || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop';
+    
+    // Serve HTML page populated with Open Graph meta tags for bot previews
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>${salonName} — Réservation</title>
+  <meta name="description" content="${description}">
+  
+  <!-- Open Graph -->
+  <meta property="og:title" content="${salonName} — Réservation">
+  <meta property="og:description" content="${description}">
+  <meta property="og:image" content="${bannerUrl}">
+  <meta property="og:type" content="website">
+  
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${salonName} — Réservation">
+  <meta name="twitter:description" content="${description}">
+  <meta name="twitter:image" content="${bannerUrl}">
+</head>
+<body>
+  <h1>${salonName}</h1>
+  <p>${description}</p>
+  <script>
+    // Redirect standard browsers back to the frontend SPA route
+    const frontendUrl = "${process.env.FRONTEND_URL || 'http://localhost:8080'}";
+    window.location.href = frontendUrl + "/booking/${slug}";
+  </script>
+</body>
+</html>`);
+  } catch (error) {
+    console.error('Error generating share preview:', error);
+    res.status(500).send('Server Error');
+  }
+};
+
+// GET /api/marketplace/bookings/count
+exports.getBookingsCount = async (req, res, next) => {
+  try {
+    const count = await Rendezvous.countDocuments({});
+    res.status(200).json({ success: true, count });
+  } catch (err) {
+    next(err);
   }
 };

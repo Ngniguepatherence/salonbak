@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Salon = require('../models/Salon');
 const { OAuth2Client } = require('google-auth-library');
+const { isSafeRedirect } = require('../utils/security');
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID || 'dummy_client_id_for_dev',
   process.env.GOOGLE_CLIENT_SECRET || 'dummy_client_secret_for_dev',
@@ -68,11 +69,7 @@ exports.login = async (req, res, next) => {
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
     }
-    const users = await User.find();
-    console.log(users);
     const user = await User.findOne({ email }).select('+password').populate('salon');
-    console.log(email, password);
-    console.log(user);
     if (!user) {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
     }
@@ -251,8 +248,10 @@ exports.googleAuthCallback = async (req, res, next) => {
 
   try {
     if (!code) {
-      const separator = targetRedirectUrl.includes('?') ? '&' : '?';
-      return res.redirect(`${targetRedirectUrl}${separator}error=no_code`);
+      const defaultUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/pro/onboarding`;
+      const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
+      const separator = safeRedirectUrl.includes('?') ? '&' : '?';
+      return res.redirect(`${safeRedirectUrl}${separator}error=no_code`);
     }
 
     let payload;
@@ -304,8 +303,10 @@ exports.googleAuthCallback = async (req, res, next) => {
       }
 
       const jwtToken = appUser.getSignedJwtToken();
-      const separator = targetRedirectUrl.includes('?') ? '&' : '?';
-      return res.redirect(`${targetRedirectUrl}${separator}token=${jwtToken}`);
+      const defaultUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/explorer/login`;
+      const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
+      const separator = safeRedirectUrl.includes('?') ? '&' : '?';
+      return res.redirect(`${safeRedirectUrl}${separator}token=${jwtToken}`);
     }
 
     let user = await User.findOne({ email }).populate('salon');
@@ -339,13 +340,17 @@ exports.googleAuthCallback = async (req, res, next) => {
     const salonExists = user.salon ? 'true' : 'false';
 
     // Redirect to frontend with token
-    const separator = targetRedirectUrl.includes('?') ? '&' : '?';
-    res.redirect(`${targetRedirectUrl}${separator}token=${jwtToken}&salonExists=${salonExists}`);
+    const defaultUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/pro/onboarding`;
+    const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
+    const separator = safeRedirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${safeRedirectUrl}${separator}token=${jwtToken}&salonExists=${salonExists}`);
 
   } catch (err) {
     console.error('Erreur google callback:', err);
-    const separator = targetRedirectUrl.includes('?') ? '&' : '?';
-    res.redirect(`${targetRedirectUrl}${separator}error=auth_failed`);
+    const defaultUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/pro/onboarding`;
+    const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
+    const separator = safeRedirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${safeRedirectUrl}${separator}error=auth_failed`);
   }
 };
 

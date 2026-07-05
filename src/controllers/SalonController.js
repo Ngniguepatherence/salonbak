@@ -9,7 +9,7 @@ const OWNER_EDITABLE_FIELDS = [
   'name', 'slogan', 'description', 'logoUrl', 'bannerUrl', 'galleryUrls', 'typeEtablissement',
   'phone', 'email',
   'address', 'ville', 'pays', 'devise', 'horaires', 'availability',
-  'joursRappelInactivite', 'joursRappelSuivi','configFidelite',
+  'joursRappelInactivite', 'joursRappelSuivi','configFidelite', 'location',
 ];
 
 // Champs que seul l'admin peut toucher
@@ -22,10 +22,13 @@ function sanitizeBody(body, role) {
   const cleaned = {};
 
   if (role === 'admin') {
-    // L'admin peut tout modifier sauf les champs système
-    const systemFields = ['_id', '__v', 'createdAt', 'updatedAt'];
-    Object.keys(body).forEach(key => {
-      if (!systemFields.includes(key)) cleaned[key] = body[key];
+    // L'admin peut modifier tous les champs autorisés de l'owner + les champs d'administration spécifiques (moindre privilège)
+    const ADMIN_EDITABLE_FIELDS = [
+      ...OWNER_EDITABLE_FIELDS,
+      'owner', 'abonnement', 'plan', 'isActive', 'limits'
+    ];
+    ADMIN_EDITABLE_FIELDS.forEach(field => {
+      if (body[field] !== undefined) cleaned[field] = body[field];
     });
   } else {
     // Owner : uniquement les champs autorisés
@@ -53,17 +56,16 @@ exports.onboardSalon = async (req, res, next) => {
 
     const {
       name, phone, email, address, ville, typeEtablissement, description, logoUrl, bannerUrl, galleryUrls, plan,
-      slogan, devise, pays, horaires
+      slogan, devise, pays, horaires, location
     } = req.body;
 
     if (!name || !phone || !email || !address) {
       return res.status(400).json({ success: false, message: 'name, phone, email et address sont requis' });
     }
 
-    const { PLANS } = require('../config/plans');
-    const config = PLANS ? (PLANS[plan || 'pro'] || PLANS.pro) : {
-      maxCustomers: 500, maxStaff: 5, maxRendezvous: 200, maxCampaignsPerMonth: 0, exportEnabled: false, campaignsEnabled: false
-    };
+    const { getPlan } = require('../config/plans');
+    const selectedPlan = await getPlan(plan || 'pro');
+    const trialDays = selectedPlan.trialDurationDays || 14;
 
     const salon = await Salon.create({
       name,
@@ -80,21 +82,24 @@ exports.onboardSalon = async (req, res, next) => {
       devise: devise || 'FCFA',
       pays: pays || 'CM',
       horaires,
+      location,
       owner: user._id,
       plan: plan || 'pro',
       isActive: true,
       limits: {
-        maxCustomers: config.maxCustomers || 500,
-        maxStaff: config.maxStaff || 5,
-        maxRendezvous: config.maxRendezvous || 200,
-        maxCampaignsPerMonth: config.maxCampaignsPerMonth || 0,
-        exportEnabled: config.exportEnabled || false,
-        campaignsEnabled: config.campaignsEnabled || false,
+        maxCustomers: selectedPlan.maxCustomers !== undefined ? selectedPlan.maxCustomers : 300,
+        maxStaff: selectedPlan.maxStaff !== undefined ? selectedPlan.maxStaff : 2,
+        maxRendezvous: selectedPlan.maxRendezvous !== undefined ? selectedPlan.maxRendezvous : 100,
+        maxCampaignsPerMonth: selectedPlan.maxCampaignsPerMonth !== undefined ? selectedPlan.maxCampaignsPerMonth : 0,
+        exportEnabled: selectedPlan.exportEnabled || false,
+        campaignsEnabled: selectedPlan.campaignsEnabled || false,
       },
       abonnement: {
         statut: 'essai',
         dateDebut: Date.now(),
-        dateFin: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) // 14 days trial as stated in UI
+        dateFin: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
+        montant: selectedPlan.price || 20000,
+        renouvellementAuto: false
       }
     });
 
@@ -320,10 +325,12 @@ exports.createStaff = async (req, res, next) => {
 
 exports.updateStaff = async (req, res, next) => {
   try {
+    // Si l'utilisateur connecté n'est pas un admin, il ne peut modifier que les membres avec le rôle 'staff'
+    const allowedRoles = req.user.role === 'admin' ? ['staff', 'owner'] : ['staff'];
     const staff = await User.findOne({
       _id: req.params.userId,
       salon: req.params.salonId,
-      role: { $in: ['staff', 'owner'] }
+      role: { $in: allowedRoles }
     });
 
     if (!staff) {

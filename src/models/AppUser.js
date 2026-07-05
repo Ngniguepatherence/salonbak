@@ -20,7 +20,7 @@ const appUserSchema = new mongoose.Schema({
   password: {
     type: String,
     required: [true, 'Veuillez fournir un mot de passe'],
-    minlength: [6, 'Le mot de passe doit contenir au moins 6 caractères'],
+    minlength: [8, 'Le mot de passe doit contenir au moins 8 caractères'],
     select: false, // Ne pas retourner dans les requêtes par défaut
   },
   telephone: {
@@ -64,7 +64,7 @@ appUserSchema.pre('save', async function () {
 appUserSchema.methods.getSignedJwtToken = function () {
   return jwt.sign(
     { id: this._id, role: this.role }, 
-    process.env.JWT_SECRET || 'secret', 
+    process.env.JWT_SECRET, 
     { expiresIn: process.env.JWT_EXPIRE || '30d' }
   );
 };

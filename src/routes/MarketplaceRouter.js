@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const {
   register,
   login,
@@ -12,17 +13,27 @@ const {
   updateProfile,
   toggleFavorite,
   initiateGoogleAuth,
-  googleAuthCallback
+  googleAuthCallback,
+  getSalonSharePreview,
+  getBookingsCount
 } = require('../controllers/MarketplaceController');
 
 const { protectAppUser } = require('../middleware/auth');
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 15,
+  message: { success: false, message: 'Trop de tentatives de connexion. Réessayez dans 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Auth routes for marketplace
-router.post('/auth/register', register);
-router.post('/auth/login', login);
+router.post('/auth/register', loginLimiter, register);
+router.post('/auth/login', loginLimiter, login);
 router.get('/auth/google', initiateGoogleAuth);
 router.get('/auth/google/callback', googleAuthCallback);
-router.post('/auth/google', googleLogin);
+router.post('/auth/google', loginLimiter, googleLogin);
 router.get('/auth/me', protectAppUser, getMe);
 router.put('/auth/profile', protectAppUser, updateProfile);
 router.post('/auth/favorites/toggle', protectAppUser, toggleFavorite);
@@ -31,7 +42,9 @@ router.post('/auth/favorites/toggle', protectAppUser, toggleFavorite);
 // Public browsing routes
 router.get('/salons', getSalons);
 router.get('/salons/:slug', getSalonBySlug);
+router.get('/salons/:slug/share-preview', getSalonSharePreview);
 router.get('/salons/:slug/appointments', getSalonAppointments);
+router.get('/bookings/count', getBookingsCount);
 
 // Protected action route
 router.post('/bookings', protectAppUser, createBooking);

@@ -33,6 +33,14 @@ const abonnementSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  downgradePlan: {
+    type: String,
+    default: null,
+  },
+  downgradeDate: {
+    type: Date,
+    default: null,
+  },
 }, { _id: false });
 
 
@@ -222,6 +230,37 @@ salonSchema.methods.joursAvantExpiration = function () {
   const fin = new Date(this.abonnement.dateFin);
   const diff = fin.getTime() - Date.now();
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+};
+
+/** Vérifie si une transition d'abonnement (downgrade planifié) est due et l'applique */
+salonSchema.methods.checkSubscriptionTransition = async function () {
+  const now = new Date();
+  if (
+    this.abonnement &&
+    this.abonnement.downgradePlan &&
+    this.abonnement.downgradeDate &&
+    now > new Date(this.abonnement.downgradeDate)
+  ) {
+    const nextPlanName = this.abonnement.downgradePlan;
+    const { getPlan } = require('../config/plans');
+    const selectedPlan = await getPlan(nextPlanName);
+
+    this.plan = nextPlanName;
+    this.abonnement.downgradePlan = null;
+    this.abonnement.downgradeDate = null;
+    this.limits = {
+      maxCustomers: selectedPlan.maxCustomers !== undefined ? selectedPlan.maxCustomers : -1,
+      maxStaff: selectedPlan.maxStaff !== undefined ? selectedPlan.maxStaff : -1,
+      maxRendezvous: selectedPlan.maxRendezvous !== undefined ? selectedPlan.maxRendezvous : -1,
+      maxCampaignsPerMonth: selectedPlan.maxCampaignsPerMonth !== undefined ? selectedPlan.maxCampaignsPerMonth : -1,
+      exportEnabled: selectedPlan.exportEnabled || false,
+      campaignsEnabled: selectedPlan.campaignsEnabled || false,
+    };
+
+    await this.save();
+    return true; // Transition effectuée
+  }
+  return false;
 };
 
 salonSchema.pre('save', function () {

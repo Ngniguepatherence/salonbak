@@ -40,6 +40,11 @@ const rendezVousSchema = new mongoose.Schema({
     enum: ['en_attente', 'confirme', 'termine', 'annule', 'paid'],
     default: 'en_attente',
   },
+  source: {
+    type: String,
+    enum: ['salon', 'en_ligne'],
+    default: 'salon',
+  },
   notes: {
     type: String,
     trim: true,
