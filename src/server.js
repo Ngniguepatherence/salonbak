@@ -45,7 +45,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://app.westdigitalhub.com',
   'https://beautyflow.westdigitalhub.com',
-  'http://localhost:5173',
+  'https://beautyflowafrica.com',
   'http://localhost:8080'
 ].filter(Boolean);
 

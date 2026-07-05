@@ -242,13 +242,14 @@ exports.initiateGoogleAuth = (req, res, next) => {
 // @route   GET /api/auth/google/callback
 // @access  Public
 exports.googleAuthCallback = async (req, res, next) => {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+  const sassUrl = process.env.FRONTEND_URL || 'https://app.westdigitalhub.com';
+  const marketplaceUrl = process.env.FRONTEND_URL_MARKETPLACE || 'https://beautyflowafrica.com';
   const { code, state } = req.query;
-  const targetRedirectUrl = state || `${frontendUrl}/pro/onboarding`;
+  const targetRedirectUrl = state || `${sassUrl}/pro/onboarding`;
 
   try {
     if (!code) {
-      const defaultUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/pro/onboarding`;
+      const defaultUrl = `${sassUrl}/pro/onboarding`;
       const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
       const separator = safeRedirectUrl.includes('?') ? '&' : '?';
       return res.redirect(`${safeRedirectUrl}${separator}error=no_code`);
@@ -303,7 +304,7 @@ exports.googleAuthCallback = async (req, res, next) => {
       }
 
       const jwtToken = appUser.getSignedJwtToken();
-      const defaultUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/explorer/login`;
+      const defaultUrl = `${marketplaceUrl}/explorer/login`;
       const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
       const separator = safeRedirectUrl.includes('?') ? '&' : '?';
       return res.redirect(`${safeRedirectUrl}${separator}token=${jwtToken}`);
@@ -340,14 +341,14 @@ exports.googleAuthCallback = async (req, res, next) => {
     const salonExists = user.salon ? 'true' : 'false';
 
     // Redirect to frontend with token
-    const defaultUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/pro/onboarding`;
+    const defaultUrl = `${sassUrl}/pro/onboarding`;
     const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
     const separator = safeRedirectUrl.includes('?') ? '&' : '?';
     res.redirect(`${safeRedirectUrl}${separator}token=${jwtToken}&salonExists=${salonExists}`);
 
   } catch (err) {
     console.error('Erreur google callback:', err);
-    const defaultUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/pro/onboarding`;
+    const defaultUrl = `${sassUrl}/pro/onboarding`;
     const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
     const separator = safeRedirectUrl.includes('?') ? '&' : '?';
     res.redirect(`${safeRedirectUrl}${separator}error=auth_failed`);

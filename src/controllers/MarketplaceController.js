@@ -7,10 +7,16 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 
 const { OAuth2Client } = require('google-auth-library');
+let redirectUriMarketplace = process.env.GOOGLE_REDIRECT_URI_MARKETPLACE || '';
+if (!redirectUriMarketplace || redirectUriMarketplace.endsWith('/api/auth/google/callback')) {
+  const base = process.env.BACKEND_URL;
+  redirectUriMarketplace = `${base}/api/marketplace/auth/google/callback`;
+}
+
 const googleMarketplaceClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID || 'dummy_client_id_for_dev',
   process.env.GOOGLE_CLIENT_SECRET || 'dummy_client_secret_for_dev',
-  process.env.GOOGLE_REDIRECT_URI_MARKETPLACE || `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/auth/google/callback`
+  redirectUriMarketplace
 );
 const { isSafeRedirect } = require('../utils/security');
 
@@ -134,7 +140,7 @@ exports.googleLogin = async (req, res) => {
     }
 
     const jwtToken = user.getSignedJwtToken();
-    
+
     // Populate favoris to return the updated user with populated fields
     const populatedUser = await AppUser.findById(user._id).populate('favoris', 'name slug address logoUrl bannerUrl galleryUrls typeEtablissement');
     populatedUser.password = undefined;
@@ -176,7 +182,7 @@ exports.initiateGoogleAuth = (req, res, next) => {
 
 // 3.1.3 Auth: Google OAuth Callback for Marketplace AppUser
 exports.googleAuthCallback = async (req, res, next) => {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+  const frontendUrl = process.env.FRONTEND_URL_MARKETPLACE || 'https://beautyflowafrica.com';
   const { code, state } = req.query;
   const targetRedirectUrl = state || `${frontendUrl}/explorer/login`;
 
@@ -258,10 +264,10 @@ exports.updateProfile = async (req, res) => {
     if (avatarUrl !== undefined) user.avatarUrl = avatarUrl;
 
     await user.save();
-    
+
     // Populate favoris to return the updated user with populated fields
     const populatedUser = await AppUser.findById(req.appUser.id).populate('favoris', 'name slug address logoUrl bannerUrl galleryUrls typeEtablissement');
-    
+
     res.status(200).json({ success: true, user: populatedUser });
   } catch (error) {
     sendErrorResponse(res, error);
@@ -589,27 +595,47 @@ exports.getSalonSharePreview = async (req, res) => {
     }
 
     const salonName = salon.name || 'Salon';
-    const description = salon.description || `Réservez votre prochain rendez-vous chez ${salonName}`;
+
+    // Resolve language (accept-language header or query parameter or default country fallback)
+    const acceptLang = req.headers['accept-language'] || '';
+    const queryLang = req.query.lang || '';
+    let isEnglish = queryLang.startsWith('en') ||
+      (!queryLang.startsWith('fr') && acceptLang.toLowerCase().startsWith('en'));
+
+    if (!queryLang && !acceptLang) {
+      const engCountries = ['US', 'GB', 'CA', 'AU', 'NG', 'GH', 'KE', 'ZA'];
+      if (salon.pays && engCountries.includes(salon.pays.toUpperCase())) {
+        isEnglish = true;
+      }
+    }
+
+    const titleSuffix = isEnglish ? 'Booking' : 'Réservation';
+    const defaultDesc = isEnglish
+      ? `Book your next appointment online at ${salonName} on BeautyFlow.`
+      : `Réservez votre prochain rendez-vous chez ${salonName} sur BeautyFlow.`;
+
+    const title = `${salonName} — ${titleSuffix}`;
+    const description = salon.description || defaultDesc;
     const bannerUrl = salon.bannerUrl || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop';
-    
+
     // Serve HTML page populated with Open Graph meta tags for bot previews
     res.setHeader('Content-Type', 'text/html');
     res.send(`<!DOCTYPE html>
-<html lang="fr">
+<html lang="${isEnglish ? 'en' : 'fr'}">
 <head>
   <meta charset="UTF-8">
-  <title>${salonName} — Réservation</title>
+  <title>${title}</title>
   <meta name="description" content="${description}">
   
   <!-- Open Graph -->
-  <meta property="og:title" content="${salonName} — Réservation">
+  <meta property="og:title" content="${title}">
   <meta property="og:description" content="${description}">
   <meta property="og:image" content="${bannerUrl}">
   <meta property="og:type" content="website">
   
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="${salonName} — Réservation">
+  <meta name="twitter:title" content="${title}">
   <meta name="twitter:description" content="${description}">
   <meta name="twitter:image" content="${bannerUrl}">
 </head>
@@ -618,8 +644,8 @@ exports.getSalonSharePreview = async (req, res) => {
   <p>${description}</p>
   <script>
     // Redirect standard browsers back to the frontend SPA route
-    const frontendUrl = "${process.env.FRONTEND_URL || 'http://localhost:8080'}";
-    window.location.href = frontendUrl + "/booking/${slug}";
+    const frontendUrl = "${process.env.FRONTEND_URL_MARKETPLACE || 'https://beautyflowafrica.com'}";
+    window.location.href = frontendUrl + "/booking/${slug}?lang=${isEnglish ? 'en' : 'fr'}";
   </script>
 </body>
 </html>`);
