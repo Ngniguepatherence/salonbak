@@ -70,11 +70,24 @@ class PaymentService {
                   const pawapayService = require('./pawapay.service');
                   const crypto = require('crypto');
 
+                  let payoutPhone = booking.salon.phone;
+                  // Utiliser le numéro MTN configuré dans les paramètres du salon en priorité
+                  if (booking.salon.paymentConfig && booking.salon.paymentConfig.payoutMtnNumber) {
+                    payoutPhone = booking.salon.paymentConfig.payoutMtnNumber;
+                  } else if (booking.salon.paymentConfig && booking.salon.paymentConfig.payoutMomoNumber) {
+                    payoutPhone = booking.salon.paymentConfig.payoutMomoNumber;
+                  }
+
                   let detectedProvider = 'MTN_MOMO_CMR';
                   try {
-                    const prediction = await pawapayService.predictProvider(booking.salon.phone);
+                    const prediction = await pawapayService.predictProvider(payoutPhone);
                     if (prediction && prediction.provider) {
                       detectedProvider = prediction.provider;
+                      // Sécurité : PawaPay ne supporte pas Orange actuellement selon l'utilisateur
+                      if (detectedProvider === 'ORANGE_CMR') {
+                        console.warn(`[PAYMENT SERVICE] Provider prédit est Orange, forçage à MTN_MOMO_CMR car Orange n'est pas supporté par PawaPay.`);
+                        detectedProvider = 'MTN_MOMO_CMR';
+                      }
                     }
                   } catch (e) {
                     console.warn(`[PAYMENT SERVICE] Impossible de prédire le provider, utilisation par défaut.`);
@@ -97,7 +110,7 @@ class PaymentService {
                     await pawapayService.initiatePayout({
                       payoutId,
                       amount: payoutAmount,
-                      phone: booking.salon.phone,
+                      phone: payoutPhone,
                       provider: detectedProvider
                     });
                   } catch (payoutError) {
