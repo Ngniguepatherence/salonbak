@@ -48,7 +48,7 @@ class PaymentService {
 
           if (transaction.type === 'reservation') {
             // Logique de réservation
-            const booking = await Rendezvous.findOne({ reference: transaction.reference }).populate('salon').populate('typePrestation');
+            const booking = await Rendezvous.findOne({ reference: transaction.reference }).populate('salon').populate('typePrestation').populate('prestations');
             if (booking && booking.statut !== 'paid') {
               booking.statut = 'paid';
               await booking.save();
@@ -58,13 +58,21 @@ class PaymentService {
                 const amount = transaction.montant || 0;
                 if (amount > 0) {
                   // Récupérer le prix de base de la prestation pour calculer le reversement net de commission
-                  let basePrice = amount;
-                  if (booking.typePrestation && booking.typePrestation.prix) {
-                    basePrice = parseInt(booking.typePrestation.prix.replace(/\D/g, ''), 10) || amount;
+                  let basePrice = 0;
+                  if (booking.prestations && booking.prestations.length > 0) {
+                    basePrice = booking.prestations.reduce((sum, p) => {
+                      return sum + (parseInt((p.prix || '').toString().replace(/\D/g, ''), 10) || 0);
+                    }, 0);
+                  } else if (booking.typePrestation && booking.typePrestation.prix) {
+                    basePrice = parseInt(booking.typePrestation.prix.toString().replace(/\D/g, ''), 10) || amount;
+                  } else {
+                     // Si impossible de lire depuis les prestations, on recalcule le prix de base depuis le total payé
+                     // Le total = (basePrice + basePrice*0.02 + basePrice*0.10) / 0.98
+                     basePrice = Math.floor((amount * 0.98) / 1.12);
                   }
 
-                  const payoutAmount = Math.floor(basePrice * 0.90);
-                  const commission = basePrice - payoutAmount;
+                  const payoutAmount = basePrice;
+                  const commission = Math.floor(basePrice * 0.10);
                   console.log(`[PAYMENT SERVICE] Reversement au salon initié : ${payoutAmount} XAF (Commission: ${commission} XAF sur prix de base ${basePrice} XAF)`);
 
                   const pawapayService = require('./pawapay.service');
