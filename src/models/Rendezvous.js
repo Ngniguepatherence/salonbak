@@ -16,6 +16,23 @@ const rendezVousSchema = new mongoose.Schema({
     ref: 'TypePrestation',
     required: [true, 'Veuillez fournir une prestation'],
   },
+  prestations: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'TypePrestation',
+  }],
+  paymentMode: {
+    type: String,
+    enum: ['online', 'onsite'],
+    default: 'online',
+  },
+  commissionAmount: {
+    type: Number,
+    default: 0,
+  },
+  commissionPaid: {
+    type: Boolean,
+    default: false,
+  },
   employe: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

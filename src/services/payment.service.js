@@ -62,8 +62,8 @@ class PaymentService {
                   if (booking.typePrestation && booking.typePrestation.prix) {
                     basePrice = parseInt(booking.typePrestation.prix.replace(/\D/g, ''), 10) || amount;
                   }
-                  
-                  const payoutAmount = Math.floor(basePrice * 0.95);
+
+                  const payoutAmount = Math.floor(basePrice * 0.90);
                   const commission = basePrice - payoutAmount;
                   console.log(`[PAYMENT SERVICE] Reversement au salon initié : ${payoutAmount} XAF (Commission: ${commission} XAF sur prix de base ${basePrice} XAF)`);
 
@@ -81,7 +81,7 @@ class PaymentService {
                   }
 
                   const payoutId = crypto.randomUUID();
-                  
+
                   // Enregistrer la tentative de décaissement
                   const payoutRecord = new PayoutTransaction({
                     salonId: booking.salon._id,
@@ -141,7 +141,7 @@ class PaymentService {
   async processCompletedPayout(payoutId, status, failureReason) {
     try {
       const isSuccessful = status === 'COMPLETED' || status === 'SUCCESS';
-      
+
       const payoutRecord = await PayoutTransaction.findOne({ pawapayPayoutId: payoutId });
       if (payoutRecord) {
         if (payoutRecord.statut === 'SUCCESSFUL' || (payoutRecord.statut !== 'PENDING' && payoutRecord.statut !== 'SUBMITTED')) {
@@ -161,7 +161,7 @@ class PaymentService {
         }
         return payoutRecord;
       }
-      
+
       console.warn(`[PAYMENT SERVICE] Aucun PayoutTransaction trouvé pour l'ID: ${payoutId}`);
       return null;
     } catch (error) {

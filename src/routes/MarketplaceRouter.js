@@ -15,7 +15,9 @@ const {
   initiateGoogleAuth,
   googleAuthCallback,
   getSalonSharePreview,
-  getBookingsCount
+  getBookingsCount,
+  getClientBookings,
+  getClientLoyalty
 } = require('../controllers/MarketplaceController');
 
 const { protectAppUser } = require('../middleware/auth');
@@ -35,6 +37,7 @@ router.get('/auth/google', initiateGoogleAuth);
 router.get('/auth/google/callback', googleAuthCallback);
 router.post('/auth/google', loginLimiter, googleLogin);
 router.get('/auth/me', protectAppUser, getMe);
+router.get('/auth/loyalty', protectAppUser, getClientLoyalty);
 router.put('/auth/profile', protectAppUser, updateProfile);
 router.post('/auth/favorites/toggle', protectAppUser, toggleFavorite);
 
@@ -48,5 +51,6 @@ router.get('/bookings/count', getBookingsCount);
 
 // Protected action route
 router.post('/bookings', protectAppUser, createBooking);
+router.get('/bookings', protectAppUser, getClientBookings);
 
 module.exports = router;

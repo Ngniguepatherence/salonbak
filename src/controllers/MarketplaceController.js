@@ -359,15 +359,31 @@ exports.getSalonBySlug = async (req, res) => {
 // 6. Bookings: Create a new booking
 exports.createBooking = async (req, res) => {
   try {
-    const { salonId, typePrestationId, date, heure, notes, telephoneClient, nomClient, employe } = req.body;
+    const { salonId, typePrestationId, typePrestationIds, date, heure, notes, telephoneClient, nomClient, employe, paymentMode } = req.body;
 
     const salon = await Salon.findById(salonId);
     if (!salon) return res.status(404).json({ success: false, message: 'Salon introuvable' });
 
     await salon.checkSubscriptionTransition();
 
-    const prestation = await TypePrestation.findById(typePrestationId);
-    if (!prestation) return res.status(404).json({ success: false, message: 'Prestation introuvable' });
+    let normalizedIds = typePrestationIds;
+    if (!Array.isArray(normalizedIds) && typePrestationId) {
+      normalizedIds = [typePrestationId];
+    }
+    if (!normalizedIds || normalizedIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'Veuillez sélectionner au moins une prestation' });
+    }
+
+    const prestations = await TypePrestation.find({ _id: { $in: normalizedIds } });
+    if (!prestations || prestations.length === 0) {
+      return res.status(404).json({ success: false, message: 'Prestation(s) introuvable(s)' });
+    }
+
+    const totalDuration = prestations.reduce((sum, p) => sum + (p.duree || 30), 0);
+    const basePrice = prestations.reduce((sum, p) => {
+      const priceNum = parseInt(p.prix.replace(/\D/g, ''), 10) || 0;
+      return sum + priceNum;
+    }, 0);
 
     // Ensure Client exists for this salon
     let clientPhone = telephoneClient || req.appUser.telephone;
@@ -378,13 +394,34 @@ exports.createBooking = async (req, res) => {
     // Cherche le client dans ce salon via son numéro de téléphone
     let client = await Client.findOne({ salon: salon._id, telephone: clientPhone });
 
+    const parrainPhone = req.body.parrainPhone;
+    let parrain = null;
+    if (parrainPhone && parrainPhone !== clientPhone) {
+      parrain = await Client.findOne({ salon: salon._id, telephone: parrainPhone });
+    }
+
     if (!client) {
       // Create Client
       client = await Client.create({
         nom: req.body.nomClient || req.appUser.nom || 'Client App',
         telephone: clientPhone,
-        salon: salon._id
+        salon: salon._id,
+        parrainId: parrain ? parrain._id : null
       });
+
+      if (parrain) {
+        parrain.pointsFidelite = (parrain.pointsFidelite || 0) + 3;
+        parrain.nombreFilleuls = (parrain.nombreFilleuls || 0) + 1;
+        await parrain.save();
+      }
+    } else if (parrain && !client.parrainId) {
+      // Client existant mais pas encore parrainé
+      client.parrainId = parrain._id;
+      await client.save();
+
+      parrain.pointsFidelite = (parrain.pointsFidelite || 0) + 3;
+      parrain.nombreFilleuls = (parrain.nombreFilleuls || 0) + 1;
+      await parrain.save();
     }
 
     // Check appointments limit
@@ -408,7 +445,7 @@ exports.createBooking = async (req, res) => {
     const dateObj = new Date(date);
     const dayOfWeek = String(dateObj.getDay()); // "0" = Dimanche, "1" = Lundi, etc.
 
-    const slotDuration = prestation.duree || 30;
+    const slotDuration = totalDuration;
     const bookingStartMin = timeToMinutes(heure);
     const bookingEndMin = bookingStartMin + slotDuration;
 
@@ -490,16 +527,25 @@ exports.createBooking = async (req, res) => {
       assignedEmployeId = availableStaff[0]._id;
     }
 
+    // Calculate commission if payment mode is onsite
+    const isOnsite = paymentMode === 'onsite';
+    const commissionRate = 0.10; // 10% commission on onsite bookings
+    const commissionAmount = isOnsite ? Math.floor(basePrice * commissionRate) : 0;
+
     // Create Rendezvous
     const rendezVous = await Rendezvous.create({
       salon: salon._id,
       client: client._id,
-      typePrestation: typePrestationId,
+      typePrestation: normalizedIds[0],
+      prestations: normalizedIds,
       employe: assignedEmployeId,
       date,
       heure,
-      duree: prestation.duree || 30,
-      statut: 'en_attente',
+      duree: totalDuration,
+      statut: isOnsite ? 'confirme' : 'en_attente',
+      paymentMode: isOnsite ? 'onsite' : 'online',
+      commissionAmount,
+      commissionPaid: false,
       notes,
     });
 
@@ -516,11 +562,12 @@ exports.createBooking = async (req, res) => {
 
     // Créer des notifications pour le propriétaire et l'employé assigné
     try {
+      const prestationNames = prestations.map(p => p.nom || p.name).join(', ');
       const notifData = {
         salon: salon._id,
         type: 'booking',
         title: 'Nouveau rendez-vous en ligne',
-        description: `Le client ${client.nom || 'Client App'} a réservé pour la prestation "${prestation.name}" le ${date} à ${heure}.`
+        description: `Le client ${client.nom || 'Client App'} a réservé pour la/les prestation(s) "${prestationNames}" le ${date} à ${heure}.`
       };
 
       // 1. Notifier le Owner
@@ -660,6 +707,43 @@ exports.getBookingsCount = async (req, res, next) => {
   try {
     const count = await Rendezvous.countDocuments({});
     res.status(200).json({ success: true, count });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/marketplace/bookings
+exports.getClientBookings = async (req, res, next) => {
+  try {
+    if (!req.appUser || !req.appUser.telephone) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+    const clients = await Client.find({ telephone: req.appUser.telephone });
+    const clientIds = clients.map(c => c._id);
+
+    const bookings = await Rendezvous.find({ client: { $in: clientIds } })
+      .populate('salon', 'name nom slug logoUrl address ville branding')
+      .populate('prestations', 'nom prix description duree')
+      .populate('typePrestation', 'nom prix description duree')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ success: true, data: bookings });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/marketplace/auth/loyalty
+exports.getClientLoyalty = async (req, res, next) => {
+  try {
+    if (!req.appUser || !req.appUser.telephone) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+    const clients = await Client.find({ telephone: req.appUser.telephone })
+      .populate('salon', 'name nom slug logoUrl bannerUrl configFidelite branding')
+      .lean();
+
+    res.status(200).json({ success: true, data: clients });
   } catch (err) {
     next(err);
   }

@@ -9,7 +9,7 @@ const OWNER_EDITABLE_FIELDS = [
   'name', 'slogan', 'description', 'logoUrl', 'bannerUrl', 'galleryUrls', 'typeEtablissement',
   'phone', 'email',
   'address', 'ville', 'pays', 'devise', 'horaires', 'availability',
-  'joursRappelInactivite', 'joursRappelSuivi','configFidelite', 'location',
+  'joursRappelInactivite', 'joursRappelSuivi','configFidelite', 'location', 'paymentConfig'
 ];
 
 // Champs que seul l'admin peut toucher
@@ -56,7 +56,7 @@ exports.onboardSalon = async (req, res, next) => {
 
     const {
       name, phone, email, address, ville, typeEtablissement, description, logoUrl, bannerUrl, galleryUrls, plan,
-      slogan, devise, pays, horaires, location
+      slogan, devise, pays, horaires, location, paymentConfig
     } = req.body;
 
     if (!name || !phone || !email || !address) {
@@ -83,6 +83,7 @@ exports.onboardSalon = async (req, res, next) => {
       pays: pays || 'CM',
       horaires,
       location,
+      paymentConfig: paymentConfig || { payoutMomoNumber: '', payoutOperator: '' },
       owner: user._id,
       plan: plan || 'pro',
       isActive: true,

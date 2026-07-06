@@ -86,8 +86,25 @@ exports.login = async (req, res, next) => {
     }
 
     // Vérification abonnement pour owner/staff
-    if (user.role !== 'admin' && user.salon) {
-      const salon = user.salon;
+    if (user.role !== 'admin') {
+      if (!user.salon) {
+        return res.status(403).json({
+          success: false,
+          message: "Aucun salon n'est associé à ce compte. Veuillez finaliser votre inscription ou contacter le support.",
+        });
+      }
+
+      // Vérification que le salon existe réellement en base (cas de salon supprimé)
+      const Salon = require('../models/Salon');
+      const salonDoc = await Salon.findById(user.salon._id || user.salon);
+      if (!salonDoc) {
+        return res.status(403).json({
+          success: false,
+          message: "Salon introuvable — ce salon n'existe plus dans le système. Veuillez contacter le support.",
+        });
+      }
+
+      const salon = salonDoc;
       if (!salon.isActive || new Date() > new Date(salon.abonnement?.dateFin)) {
         return res.status(403).json({
           success: false,

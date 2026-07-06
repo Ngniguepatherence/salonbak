@@ -211,6 +211,78 @@ const salonSchema = new mongoose.Schema({
     exportEnabled: { type: Boolean, default: false },
     campaignsEnabled: { type: Boolean, default: false },
   },
+  paymentConfig: {
+    payoutMomoNumber: {
+      type: String,
+      trim: true,
+      default: '',
+      validate: {
+        validator: function(v) {
+          if (!v) return true;
+          const clean = v.replace(/\D/g, '');
+          // Accept 9-digit local Cameroonian phone numbers or 12-digit international format (with 237)
+          return clean.length === 9 || (clean.length === 12 && clean.startsWith('237'));
+        },
+        message: props => `${props.value} n'est pas un numéro Mobile Money valide !`
+      }
+    },
+    payoutOperator: {
+      type: String,
+      enum: ['mtn', 'orange', ''],
+      default: ''
+    },
+    payoutMomoName: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    payoutMtnNumber: {
+      type: String,
+      trim: true,
+      default: '',
+      validate: {
+        validator: function(v) {
+          if (!v) return true;
+          const clean = v.replace(/\D/g, '');
+          return clean.length === 9 || (clean.length === 12 && clean.startsWith('237'));
+        },
+        message: props => `${props.value} n'est pas un numéro MTN valide !`
+      }
+    },
+    payoutMtnName: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    payoutOrangeNumber: {
+      type: String,
+      trim: true,
+      default: '',
+      validate: {
+        validator: function(v) {
+          if (!v) return true;
+          const clean = v.replace(/\D/g, '');
+          return clean.length === 9 || (clean.length === 12 && clean.startsWith('237'));
+        },
+        message: props => `${props.value} n'est pas un numéro Orange valide !`
+      }
+    },
+    payoutOrangeName: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    payoutWaveNumber: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    payoutWaveName: {
+      type: String,
+      trim: true,
+      default: ''
+    }
+  }
 
 }, { timestamps: true });
 
