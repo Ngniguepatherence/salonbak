@@ -126,13 +126,23 @@ exports.createSalon = async (req, res, next) => {
       salonPhone,
       salonEmail,
       salonAddress,
-      plan
+      plan,
+      affiliateCode
     } = req.body;
 
     // 1. Check if user already exists
     let user = await User.findOne({ email: ownerEmail });
     if (user) {
       return res.status(400).json({ success: false, message: 'Un utilisateur avec cet email existe déjà' });
+    }
+
+    // Validate affiliateCode if provided
+    if (affiliateCode) {
+      const Affiliate = require('../models/Affiliate');
+      const affiliate = await Affiliate.findOne({ affiliateCode: affiliateCode.trim().toUpperCase() });
+      if (!affiliate) {
+        return res.status(400).json({ success: false, message: "Le code d'affiliation fourni est invalide." });
+      }
     }
 
     // 2. Create the owner user
@@ -156,6 +166,7 @@ exports.createSalon = async (req, res, next) => {
       address: salonAddress,
       owner: user._id,
       plan: plan || 'basic',
+      affiliateCode: affiliateCode ? affiliateCode.trim().toUpperCase() : null,
       isActive: true,
       limits: {
         maxCustomers: selectedPlan.maxCustomers !== undefined ? selectedPlan.maxCustomers : 300,

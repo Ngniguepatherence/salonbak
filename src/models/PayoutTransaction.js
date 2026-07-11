@@ -6,9 +6,18 @@ const payoutTransactionSchema = new mongoose.Schema({
     ref: 'Salon',
     required: [true, 'Une transaction doit être liée à un salon'],
   },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
   rendezvousId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Rendezvous',
+  },
+  type: {
+    type: String,
+    enum: ['salon_reversement', 'affiliate_commission'],
+    default: 'salon_reversement',
   },
   pawapayPayoutId: {
     type: String,

@@ -115,6 +115,102 @@ class SubscriptionService {
       await salon.save();
       console.log(`[SUBSCRIPTION SERVICE] Abonnement ${planName} activé pour le salon ${salon.name} (Ref: ${transactionReference}). Type d'opération : ${isDowngrade ? 'Downgrade' : isUpgrade ? 'Upgrade' : 'Renouvellement/Achat'}. Date fin globale : ${salon.abonnement.dateFin}`);
 
+      // 2. Check if this is the first payment of the salon and handles affiliate payment
+      if (salon.affiliateCode && !salon.affiliatePaid) {
+        try {
+          const Affiliate = require('../models/Affiliate');
+          const affiliate = await Affiliate.findOne({ affiliateCode: salon.affiliateCode });
+          if (affiliate) {
+            console.log(`[AFFILIATE SYSTEM] First payment completed for salon: ${salon.name} (Plan: ${planName}, Price: ${selectedPlan.price} XAF). Ref: ${transactionReference}. Triggering payout for affiliate: ${affiliate.name} (Code: ${salon.affiliateCode})`);
+            
+            // Commission calculation: 20% of subscription price
+            const commissionAmount = Math.round(selectedPlan.price * 0.20);
+            
+            if (commissionAmount > 0) {
+              const pawapayService = require('./pawapay.service');
+              const PayoutTransaction = require('../models/PayoutTransaction');
+              const crypto = require('crypto');
+              
+              const payoutId = crypto.randomUUID();
+              
+              let payoutPhone = affiliate.telephone || '';
+              let payoutOperator = '';
+              let payoutName = affiliate.name;
+              
+              if (affiliate.payoutConfig) {
+                if (affiliate.payoutConfig.payoutMomoNumber) payoutPhone = affiliate.payoutConfig.payoutMomoNumber;
+                if (affiliate.payoutConfig.payoutOperator) payoutOperator = affiliate.payoutConfig.payoutOperator;
+                if (affiliate.payoutConfig.payoutMomoName) payoutName = affiliate.payoutConfig.payoutMomoName;
+              }
+              
+              if (payoutPhone) {
+                let detectedProvider = 'MTN_MOMO_CMR';
+                if (payoutOperator === 'orange') {
+                  detectedProvider = 'ORANGE_CMR';
+                } else if (payoutOperator === 'mtn') {
+                  detectedProvider = 'MTN_MOMO_CMR';
+                } else {
+                  try {
+                    const prediction = await pawapayService.predictProvider(payoutPhone);
+                    if (prediction && prediction.provider) {
+                      detectedProvider = prediction.provider;
+                      if (detectedProvider === 'ORANGE_CMR') {
+                        console.warn(`[AFFILIATE SYSTEM] Provider predicted is Orange, forcing to MTN_MOMO_CMR.`);
+                        detectedProvider = 'MTN_MOMO_CMR';
+                      }
+                    }
+                  } catch (e) {
+                    console.warn(`[AFFILIATE SYSTEM] Predict provider failed, using default: ${detectedProvider}`);
+                  }
+                }
+                
+                const payoutRecord = new PayoutTransaction({
+                  salonId: salon._id,
+                  userId: affiliate._id,
+                  pawapayPayoutId: payoutId,
+                  montant: commissionAmount,
+                  devise: 'XAF',
+                  statut: 'PENDING',
+                  type: 'affiliate_commission'
+                });
+                await payoutRecord.save();
+                
+                try {
+                  await pawapayService.initiatePayout({
+                    payoutId,
+                    amount: commissionAmount,
+                    phone: payoutPhone,
+                    provider: detectedProvider,
+                    description: `Affiliation ${salon.name}`.slice(0, 22)
+                  });
+                  
+                  // Mark salon affiliate as paid
+                  salon.affiliatePaid = true;
+                  await salon.save();
+                  
+                  // Update affiliate earnings cache
+                  affiliate.affiliateEarnings = (affiliate.affiliateEarnings || 0) + commissionAmount;
+                  await affiliate.save();
+                  
+                  console.log(`[AFFILIATE SYSTEM] Affiliate payout initiated successfully for amount: ${commissionAmount} XAF`);
+                } catch (payoutError) {
+                  payoutRecord.statut = 'FAILED';
+                  payoutRecord.failureReason = payoutError.message || 'Erreur lors de l\'initiation du décaissement';
+                  await payoutRecord.save();
+                  console.error(`[AFFILIATE SYSTEM] Affiliate payout initiation failed: ${payoutError.message}`);
+                }
+              } else {
+                console.warn(`[AFFILIATE SYSTEM] Affiliate has no payout phone number configured. Payout skipped.`);
+              }
+            }
+          } else {
+            console.warn(`[AFFILIATE SYSTEM] Salon has affiliateCode ${salon.affiliateCode} but no matching affiliate user was found.`);
+          }
+        } catch (affiliateError) {
+          console.error('[AFFILIATE SYSTEM] Error processing affiliate payout:', affiliateError);
+        }
+      }
+
       return salon;
     } catch (error) {
       console.error('Erreur lors de l\'activation de l\'abonnement:', error);

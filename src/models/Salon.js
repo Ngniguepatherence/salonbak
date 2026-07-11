@@ -199,6 +199,14 @@ const salonSchema = new mongoose.Schema({
     enum: ['basic', 'pro', 'premium'],
     default: 'basic',
   },
+  affiliateCode: {
+    type: String,
+    default: null,
+  },
+  affiliatePaid: {
+    type: Boolean,
+    default: false,
+  },
   isActive: {
     type: Boolean,
     default: true,

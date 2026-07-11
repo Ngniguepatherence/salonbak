@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Affiliate = require('../models/Affiliate');
 const Salon = require('../models/Salon');
 const { OAuth2Client } = require('google-auth-library');
 const { isSafeRedirect } = require('../utils/security');
@@ -28,6 +29,9 @@ const buildSessionResponse = (user, salon, token) => {
       'produits:read',
       'ventes:read', 'ventes:write',
     ],
+    affiliate: [
+      'affiliate:read',
+    ],
   };
 
   return {
@@ -40,6 +44,11 @@ const buildSessionResponse = (user, salon, token) => {
       telephone: user.telephone,
       avatarUrl: user.avatarUrl,
       salon: user.salon,
+      ville: user.ville || '',
+      pays: user.pays || 'CM',
+      affiliateCode: user.affiliateCode || null,
+      affiliateEarnings: user.affiliateEarnings || 0,
+      payoutConfig: user.payoutConfig || null,
     },
     salon: salon || null,
     session: {
@@ -69,7 +78,10 @@ exports.login = async (req, res, next) => {
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
     }
-    const user = await User.findOne({ email }).select('+password').populate('salon');
+    let user = await User.findOne({ email }).select('+password').populate('salon');
+    if (!user) {
+      user = await Affiliate.findOne({ email }).select('+password');
+    }
     if (!user) {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
     }
@@ -86,7 +98,7 @@ exports.login = async (req, res, next) => {
     }
 
     // Vérification abonnement pour owner/staff
-    if (user.role !== 'admin') {
+    if (user.role !== 'admin' && user.role !== 'affiliate') {
       if (!user.salon) {
         return res.status(403).json({
           success: false,
@@ -183,8 +195,11 @@ exports.adminLogin = async (req, res, next) => {
 // @access  Private
 exports.getMe = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id).populate('salon');
-    const salon = user.role === 'admin' ? null : user.salon;
+    let user = await User.findById(req.user._id).populate('salon');
+    if (!user) {
+      user = await Affiliate.findById(req.user._id);
+    }
+    const salon = (user.role === 'admin' || user.role === 'affiliate') ? null : user.salon;
     const token = user.getSignedJwtToken();
 
     res.status(200).json({
@@ -207,7 +222,10 @@ exports.updatePassword = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Les deux mots de passe sont requis' });
     }
 
-    const user = await User.findById(req.user._id).select('+password');
+    let user = await User.findById(req.user._id).select('+password');
+    if (!user) {
+      user = await Affiliate.findById(req.user._id).select('+password');
+    }
     const isMatch = await user.matchPassword(currentPassword);
 
     if (!isMatch) {
@@ -407,17 +425,44 @@ exports.googleTokenLogin = async (req, res, next) => {
     }
 
     const { email, name, sub: googleId, picture } = payload;
-    let user = await User.findOne({ email }).populate('salon');
+    const targetRole = req.body.role === 'affiliate' ? 'affiliate' : 'owner';
+    
+    let user;
+    if (targetRole === 'affiliate') {
+      user = await Affiliate.findOne({ email });
+    } else {
+      user = await User.findOne({ email }).populate('salon');
+    }
 
     if (!user) {
-      user = await User.create({
-        name,
-        email,
-        googleId,
-        avatarUrl: picture,
-        role: 'owner',
-        actif: true,
-      });
+      if (targetRole === 'affiliate') {
+        let affiliateCode = undefined;
+        let codeExists = true;
+        while (codeExists) {
+          affiliateCode = 'BF-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+          const existing = await Affiliate.findOne({ affiliateCode });
+          if (!existing) codeExists = false;
+        }
+
+        user = await Affiliate.create({
+          name,
+          email,
+          googleId,
+          avatarUrl: picture,
+          role: 'affiliate',
+          affiliateCode,
+          actif: true,
+        });
+      } else {
+        user = await User.create({
+          name,
+          email,
+          googleId,
+          avatarUrl: picture,
+          role: 'owner',
+          actif: true,
+        });
+      }
     } else {
       let updated = false;
       if (!user.googleId) {
@@ -444,6 +489,251 @@ exports.googleTokenLogin = async (req, res, next) => {
 
   } catch (err) {
     console.error('Erreur googleTokenLogin:', err);
+    next(err);
+  }
+};
+
+// @desc    Register a new affiliate
+// @route   POST /api/auth/affiliate/register
+// @access  Public
+exports.affiliateRegister = async (req, res, next) => {
+  try {
+    const { name, email, password, telephone, ville, pays } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ success: false, message: 'Le nom, l\'email et le mot de passe sont requis' });
+    }
+
+    const userExists = await Affiliate.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({ success: false, message: 'Cet email est déjà utilisé' });
+    }
+
+    // Generate unique affiliate code
+    let affiliateCode;
+    let codeExists = true;
+    while (codeExists) {
+      affiliateCode = 'BF-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+      const existing = await Affiliate.findOne({ affiliateCode });
+      if (!existing) codeExists = false;
+    }
+
+    const user = await Affiliate.create({
+      name,
+      email,
+      password,
+      telephone,
+      ville,
+      pays: pays || 'CM',
+      role: 'affiliate',
+      affiliateCode,
+      actif: true
+    });
+
+    const token = user.getSignedJwtToken();
+
+    res.status(201).json({
+      success: true,
+      ...buildSessionResponse(user, null, token)
+    });
+  } catch (err) {
+    console.error('Erreur lors de l\'inscription de l\'affilié:', err);
+    next(err);
+  }
+};
+
+// @desc    Update payout configuration for affiliate
+// @route   PUT /api/auth/affiliate/payout-config
+// @access  Private
+exports.updatePayoutConfig = async (req, res, next) => {
+  try {
+    const { payoutMomoNumber, payoutOperator, payoutMomoName } = req.body;
+
+    if (req.user.role !== 'affiliate') {
+      return res.status(403).json({ success: false, message: 'Réservé aux affiliés' });
+    }
+
+    const user = await Affiliate.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+    }
+
+    user.payoutConfig = {
+      payoutMomoNumber: payoutMomoNumber || '',
+      payoutOperator: payoutOperator || '',
+      payoutMomoName: payoutMomoName || ''
+    };
+
+    if (payoutMomoNumber && !user.telephone) {
+      user.telephone = payoutMomoNumber;
+    }
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Configuration de reversement mise à jour avec succès',
+      data: user.payoutConfig
+    });
+  } catch (err) {
+    console.error('Erreur updatePayoutConfig:', err);
+    next(err);
+  }
+};
+
+// @desc    Get affiliate referrals and earnings statistics
+// @route   GET /api/auth/affiliate/stats
+// @access  Private
+exports.getAffiliateStats = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'affiliate') {
+      return res.status(403).json({ success: false, message: 'Réservé aux affiliés' });
+    }
+
+    const code = req.user.affiliateCode || null;
+
+    // Get all salons with this affiliate code
+    const salons = code ? await Salon.find({ affiliateCode: code }).populate('owner', 'name email telephone') : [];
+
+    // Get all payout transactions for this user
+    const PayoutTransaction = require('../models/PayoutTransaction');
+    const payouts = await PayoutTransaction.find({ userId: req.user.id });
+
+    // Compute stats
+    let totalEarned = 0;
+    let totalPending = 0;
+
+    payouts.forEach(p => {
+      if (p.statut === 'SUCCESSFUL') {
+        totalEarned += p.montant;
+      } else if (p.statut === 'PENDING' || p.statut === 'SUBMITTED') {
+        totalPending += p.montant;
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        code,
+        partner: {
+          name: req.user.name,
+          email: req.user.email,
+          telephone: req.user.telephone || '',
+          ville: req.user.ville || '',
+          pays: req.user.pays || 'CM'
+        },
+        stats: {
+          totalReferred: salons.length,
+          activeReferred: salons.filter(s => s.isActive).length,
+          totalEarned,
+          totalPending
+        },
+        payouts: payouts.map(p => ({
+          _id: p._id,
+          montant: p.montant,
+          statut: p.statut,
+          failureReason: p.failureReason,
+          createdAt: p.createdAt
+        })),
+        referrals: salons.map(s => ({
+          _id: s._id,
+          name: s.name,
+          plan: s.plan,
+          isActive: s.isActive,
+          affiliatePaid: s.affiliatePaid,
+          createdAt: s.createdAt,
+          abonnement: s.abonnement
+        }))
+      }
+    });
+  } catch (err) {
+    console.error('Erreur getAffiliateStats:', err);
+    next(err);
+  }
+};
+
+// @desc    Create custom or auto affiliate code
+// @route   POST /api/auth/affiliate/create-code
+// @access  Private
+exports.createAffiliateCode = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'affiliate') {
+      return res.status(403).json({ success: false, message: 'Réservé aux affiliés' });
+    }
+
+    let { code } = req.body;
+
+    if (code) {
+      code = code.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+      if (code.length < 3) {
+        return res.status(400).json({ success: false, message: 'Le code doit contenir au moins 3 caractères (lettres ou chiffres)' });
+      }
+      
+      const existing = await Affiliate.findOne({ affiliateCode: code });
+      if (existing) {
+        return res.status(400).json({ success: false, message: "Ce code d'affiliation est déjà utilisé par un autre partenaire." });
+      }
+    } else {
+      let codeExists = true;
+      while (codeExists) {
+        code = 'BF-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        const existing = await Affiliate.findOne({ affiliateCode: code });
+        if (!existing) codeExists = false;
+      }
+    }
+
+    const user = await Affiliate.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Affilié non trouvé' });
+    }
+
+    user.affiliateCode = code;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Code d'affiliation créé avec succès",
+      code
+    });
+  } catch (err) {
+    console.error('Erreur createAffiliateCode:', err);
+    next(err);
+  }
+};
+
+// @desc    Update affiliate profile info
+// @route   PUT /api/auth/affiliate/profile
+// @access  Private
+exports.updateAffiliateProfile = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'affiliate') {
+      return res.status(403).json({ success: false, message: 'Réservé aux affiliés' });
+    }
+
+    const { telephone, ville, pays } = req.body;
+
+    const user = await Affiliate.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Affilié non trouvé' });
+    }
+
+    if (telephone) user.telephone = telephone;
+    if (ville) user.ville = ville;
+    if (pays) user.pays = pays;
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Profil mis à jour avec succès',
+      data: {
+        telephone: user.telephone,
+        ville: user.ville,
+        pays: user.pays
+      }
+    });
+  } catch (err) {
+    console.error('Erreur updateAffiliateProfile:', err);
     next(err);
   }
 };

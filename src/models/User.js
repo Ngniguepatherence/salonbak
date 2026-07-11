@@ -33,8 +33,34 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['owner', 'staff', 'admin'],
+    enum: ['owner', 'staff', 'admin', 'affiliate'],
     default: 'staff',
+  },
+  affiliateCode: {
+    type: String,
+    unique: true,
+    sparse: true,
+  },
+  affiliateEarnings: {
+    type: Number,
+    default: 0,
+  },
+  payoutConfig: {
+    payoutMomoNumber: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    payoutOperator: {
+      type: String,
+      enum: ['mtn', 'orange', ''],
+      default: '',
+    },
+    payoutMomoName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
   },
   // Lien vers le salon — obligatoire sauf pour les admins globaux
   salon: {
@@ -45,6 +71,16 @@ const userSchema = new mongoose.Schema({
     type: String,
     trim: true,
     maxlength: [20, 'Le numéro de téléphone ne peut pas dépasser 20 caractères'],
+  },
+  ville: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  pays: {
+    type: String,
+    trim: true,
+    default: 'CM',
   },
   avatarUrl: {
     type: String,

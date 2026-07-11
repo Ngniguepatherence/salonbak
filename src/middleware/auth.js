@@ -17,7 +17,12 @@ exports.protect = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).populate('salon', 'name isActive abonnement plan limits');
+    let user = await User.findById(decoded.id).populate('salon', 'name isActive abonnement plan limits');
+
+    if (!user) {
+      const Affiliate = require('../models/Affiliate');
+      user = await Affiliate.findById(decoded.id);
+    }
 
     if (!user) {
       return res.status(401).json({ success: false, message: 'Utilisateur introuvable' });

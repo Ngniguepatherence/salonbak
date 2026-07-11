@@ -56,11 +56,19 @@ exports.onboardSalon = async (req, res, next) => {
 
     const {
       name, phone, email, address, ville, typeEtablissement, description, logoUrl, bannerUrl, galleryUrls, plan,
-      slogan, devise, pays, horaires, location, paymentConfig
+      slogan, devise, pays, horaires, location, paymentConfig, affiliateCode
     } = req.body;
 
     if (!name || !phone || !email || !address) {
       return res.status(400).json({ success: false, message: 'name, phone, email et address sont requis' });
+    }
+
+    if (affiliateCode) {
+      const Affiliate = require('../models/Affiliate');
+      const affiliate = await Affiliate.findOne({ affiliateCode: affiliateCode.trim().toUpperCase() });
+      if (!affiliate) {
+        return res.status(400).json({ success: false, message: "Le code d'affiliation fourni est invalide." });
+      }
     }
 
     const { getPlan } = require('../config/plans');
@@ -86,6 +94,7 @@ exports.onboardSalon = async (req, res, next) => {
       paymentConfig: paymentConfig || { payoutMomoNumber: '', payoutOperator: '' },
       owner: user._id,
       plan: plan || 'pro',
+      affiliateCode: affiliateCode ? affiliateCode.trim().toUpperCase() : null,
       isActive: true,
       limits: {
         maxCustomers: selectedPlan.maxCustomers !== undefined ? selectedPlan.maxCustomers : 300,

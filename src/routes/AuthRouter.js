@@ -1,16 +1,27 @@
 const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
-const { login, adminLogin, updatePassword, getMe, initiateGoogleAuth, googleAuthCallback, googleTokenLogin } = require('../controllers/AuthController');
+const { 
+  login, 
+  adminLogin, 
+  updatePassword, 
+  getMe, 
+  initiateGoogleAuth, 
+  googleAuthCallback, 
+  googleTokenLogin,
+  affiliateRegister,
+  updatePayoutConfig,
+  getAffiliateStats,
+  createAffiliateCode,
+  updateAffiliateProfile
+} = require('../controllers/AuthController');
 
 const { protect } = require('../middleware/auth');
 
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 15,
-  message: { success: false, message: 'Trop de tentatives de connexion. Réessayez dans 15 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { success: false, message: 'Too many requests' }
 });
 
 router.post('/login', loginLimiter, login);
@@ -20,6 +31,13 @@ router.post('/admin-login', loginLimiter, adminLogin);
 router.get('/google', initiateGoogleAuth);
 router.get('/google/callback', googleAuthCallback);
 router.post('/google', loginLimiter, googleTokenLogin);
+
+// Routes Affiliation
+router.post('/affiliate/register', loginLimiter, affiliateRegister);
+router.put('/affiliate/payout-config', protect, updatePayoutConfig);
+router.get('/affiliate/stats', protect, getAffiliateStats);
+router.post('/affiliate/create-code', protect, createAffiliateCode);
+router.put('/affiliate/profile', protect, updateAffiliateProfile);
 
 // PUT  /api/auth/password
 router.put('/password', protect, updatePassword);
