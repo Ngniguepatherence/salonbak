@@ -17,7 +17,8 @@ const {
   getSalonSharePreview,
   getBookingsCount,
   getClientBookings,
-  getClientLoyalty
+  getClientLoyalty,
+  confirmBookingCompletion
 } = require('../controllers/MarketplaceController');
 
 const { protectAppUser } = require('../middleware/auth');
@@ -52,5 +53,6 @@ router.get('/bookings/count', getBookingsCount);
 // Protected action route
 router.post('/bookings', protectAppUser, createBooking);
 router.get('/bookings', protectAppUser, getClientBookings);
+router.post('/bookings/:id/confirm-completion', protectAppUser, confirmBookingCompletion);
 
 module.exports = router;

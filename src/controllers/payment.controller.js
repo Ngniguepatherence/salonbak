@@ -71,12 +71,10 @@ exports.createDeposit = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Salon introuvable.' });
     }
 
-    // 2. Récupérer le montant du plan choisi et y ajouter les frais (1% MMO + 2% supp)
+    // 2. Récupérer le montant du plan choisi (prix exact sans frais supplémentaires)
     const selectedPlan = await getPlan(plan);
     const basePrice = selectedPlan ? selectedPlan.price : 5000;
-    const mmoFee = Math.ceil(basePrice * 0.01);
-    const additionalFee = Math.ceil(basePrice * 0.02);
-    const amount = basePrice + mmoFee + additionalFee;
+    const amount = basePrice;
 
     // 3. Générer les identifiants uniques
     const reference = `SUB-${crypto.randomUUID()}`;
@@ -110,12 +108,13 @@ exports.createDeposit = async (req, res, next) => {
     }
 
     // 5. Appeler l'API pawaPay V2 pour initier le paiement USSD Push
+    const planLabel = (selectedPlan?.name || plan || 'Basic').toLowerCase();
     const pawaPayResult = await pawapayService.initiateDeposit({
       depositId,
       amount,
       phone,
       clientReferenceId: reference,
-      description: `Abo ${plan || 'Basic'}`.slice(0, 22),
+      description: `Abo Beautyflow ${planLabel}`.slice(0, 22),
       provider
     });
 
@@ -422,11 +421,50 @@ exports.createRefund = async (req, res, next) => {
  */
 exports.getPaymentStatus = async (req, res, next) => {
   try {
-    const transaction = await Transaction.findOne({ pawapayDepositId: req.params.depositId });
+    const depositId = req.params.depositId;
+    let transaction = await Transaction.findOne({ pawapayDepositId: depositId });
     if (!transaction) {
       return res.status(404).json({ success: false, message: 'Transaction introuvable' });
     }
-    res.status(200).json({ success: true, status: transaction.statut });
+
+    // Si la transaction est toujours PENDING, interroger l'API pawaPay en direct pour mise à jour
+    if (transaction.statut === 'PENDING') {
+      try {
+        const depositData = await pawapayService.getDepositStatus(depositId);
+        if (depositData && depositData.status && depositData.status !== 'PENDING' && depositData.status !== 'SUBMITTED') {
+          transaction = await paymentService.processCompletedDeposit(
+            depositId,
+            depositData.status,
+            transaction.reference,
+            depositData.failureReason || depositData.rejectionReason || depositData.failureMessage
+          );
+        }
+      } catch (err) {
+        console.warn(`[getPaymentStatus] Impossible d'interroger pawaPay en direct : ${err.message}`);
+      }
+    }
+
+    let message = null;
+    const reason = ((transaction.failureReason || '') + '').toLowerCase();
+    const isFailed = transaction.statut === 'FAILED' || transaction.statut === 'CANCELLED' || transaction.statut === 'REJECTED';
+    if (isFailed) {
+      if (reason.includes('insufficient') || reason.includes('solde') || reason.includes('not_enough') || reason.includes('funds') || reason.includes('balance')) {
+        message = 'Solde insuffisant dans votre compte Mobile Money.';
+      } else if (reason.includes('cancel') || reason.includes('annul')) {
+        message = 'Paiement annulé par l\'utilisateur.';
+      } else if (reason.includes('timeout') || reason.includes('expir')) {
+        message = 'Délai d\'attente dépassé (expiration du paiement).';
+      } else {
+        message = transaction.failureReason || 'Le paiement Mobile Money n\'a pas pu être validé.';
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      status: transaction.statut,
+      failureReason: transaction.failureReason,
+      message
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

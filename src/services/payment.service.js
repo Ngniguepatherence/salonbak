@@ -31,7 +31,7 @@ class PaymentService {
   /**
    * Traite la notification finale d'un paiement réussi ou échoué
    */
-  async processCompletedDeposit(depositId, status, clientReferenceId) {
+  async processCompletedDeposit(depositId, status, clientReferenceId, failureReasonData) {
     try {
       const isSuccessful = status === 'COMPLETED' || status === 'SUCCESS';
 
@@ -52,85 +52,7 @@ class PaymentService {
             if (booking && booking.statut !== 'paid') {
               booking.statut = 'paid';
               await booking.save();
-              console.log(`[PAYMENT SERVICE] Réservation ${transaction.reference} marquée comme payée.`);
-
-              if (booking.salon && booking.salon.phone) {
-                const amount = transaction.montant || 0;
-                if (amount > 0) {
-                  // Récupérer le prix de base de la prestation pour calculer le reversement net de commission
-                  let basePrice = 0;
-                  if (booking.prestations && booking.prestations.length > 0) {
-                    basePrice = booking.prestations.reduce((sum, p) => {
-                      return sum + (parseInt((p.prix || '').toString().replace(/\D/g, ''), 10) || 0);
-                    }, 0);
-                  } else if (booking.typePrestation && booking.typePrestation.prix) {
-                    basePrice = parseInt(booking.typePrestation.prix.toString().replace(/\D/g, ''), 10) || amount;
-                  } else {
-                     // Si impossible de lire depuis les prestations, on recalcule le prix de base depuis le total payé
-                     // Le total = (basePrice + basePrice*0.02 + basePrice*0.10) / 0.98
-                     basePrice = Math.floor((amount * 0.98) / 1.12);
-                  }
-
-                  const payoutAmount = basePrice;
-                  const commission = Math.floor(basePrice * 0.10);
-                  console.log(`[PAYMENT SERVICE] Reversement au salon initié : ${payoutAmount} XAF (Commission: ${commission} XAF sur prix de base ${basePrice} XAF)`);
-
-                  const pawapayService = require('./pawapay.service');
-                  const crypto = require('crypto');
-
-                  let payoutPhone = booking.salon.phone;
-                  // Utiliser le numéro MTN configuré dans les paramètres du salon en priorité
-                  if (booking.salon.paymentConfig && booking.salon.paymentConfig.payoutMtnNumber) {
-                    payoutPhone = booking.salon.paymentConfig.payoutMtnNumber;
-                  } else if (booking.salon.paymentConfig && booking.salon.paymentConfig.payoutMomoNumber) {
-                    payoutPhone = booking.salon.paymentConfig.payoutMomoNumber;
-                  }
-
-                  let detectedProvider = 'MTN_MOMO_CMR';
-                  try {
-                    const prediction = await pawapayService.predictProvider(payoutPhone);
-                    if (prediction && prediction.provider) {
-                      detectedProvider = prediction.provider;
-                      // Sécurité : PawaPay ne supporte pas Orange actuellement selon l'utilisateur
-                      if (detectedProvider === 'ORANGE_CMR') {
-                        console.warn(`[PAYMENT SERVICE] Provider prédit est Orange, forçage à MTN_MOMO_CMR car Orange n'est pas supporté par PawaPay.`);
-                        detectedProvider = 'MTN_MOMO_CMR';
-                      }
-                    }
-                  } catch (e) {
-                    console.warn(`[PAYMENT SERVICE] Impossible de prédire le provider, utilisation par défaut.`);
-                  }
-
-                  const payoutId = crypto.randomUUID();
-
-                  // Enregistrer la tentative de décaissement
-                  const payoutRecord = new PayoutTransaction({
-                    salonId: booking.salon._id,
-                    rendezvousId: booking._id,
-                    pawapayPayoutId: payoutId,
-                    montant: payoutAmount,
-                    devise: 'XAF',
-                    statut: 'PENDING'
-                  });
-                  await payoutRecord.save();
-
-                  try {
-                    await pawapayService.initiatePayout({
-                      payoutId,
-                      amount: payoutAmount,
-                      phone: payoutPhone,
-                      provider: detectedProvider
-                    });
-                  } catch (payoutError) {
-                    payoutRecord.statut = 'FAILED';
-                    payoutRecord.failureReason = payoutError.message || 'Erreur inconnue';
-                    await payoutRecord.save();
-                    console.error(`[PAYMENT SERVICE] Echec de l'initiation du reversement: ${payoutError.message}`);
-                  }
-                } else {
-                  console.warn(`[PAYMENT SERVICE] Impossible de faire le payout, montant introuvable pour le depositId: ${depositId}`);
-                }
-              }
+              console.log(`[PAYMENT SERVICE] Réservation ${transaction.reference} marquée comme payée en ligne. Le reversement (Payout) sera effectué lors de la confirmation de la prestation.`);
             }
           } else {
             // Activer la logique d'abonnement via le service dédié
@@ -141,8 +63,17 @@ class PaymentService {
               transaction.dureeJours
             );
           }
-        } else if (status === 'FAILED' || status === 'CANCELLED') {
+        } else if (status === 'FAILED' || status === 'CANCELLED' || status === 'REJECTED') {
           transaction.statut = status.toUpperCase();
+          if (failureReasonData) {
+            let reasonStr = '';
+            if (typeof failureReasonData === 'object') {
+              reasonStr = failureReasonData.failureMessage || failureReasonData.failureCode || failureReasonData.rejectionReason || JSON.stringify(failureReasonData);
+            } else {
+              reasonStr = String(failureReasonData);
+            }
+            transaction.failureReason = reasonStr;
+          }
           await transaction.save();
         }
         return transaction;
@@ -187,6 +118,114 @@ class PaymentService {
       return null;
     } catch (error) {
       console.error('Erreur processCompletedPayout:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Exécute le Payout au salon pour une réservation complétée/confirmée
+   */
+  async executeBookingPayout(booking) {
+    try {
+      if (!booking || !booking.salon) {
+        throw new Error('Réservation ou salon introuvable');
+      }
+
+      // Vérifier si un payout a déjà été effectué ou initié pour ce rendez-vous
+      const existingPayout = await PayoutTransaction.findOne({
+        rendezvousId: booking._id,
+        statut: { $in: ['PENDING', 'SUBMITTED', 'SUCCESSFUL'] }
+      });
+
+      if (existingPayout) {
+        console.log(`[PAYMENT SERVICE] Payout déjà existant pour le rendez-vous ${booking.reference} (Statut: ${existingPayout.statut})`);
+        return existingPayout;
+      }
+
+      // Trouver la transaction de paiement associée pour connaître le montant total payé
+      const transaction = await Transaction.findOne({
+        reference: booking.reference,
+        statut: 'SUCCESSFUL',
+        type: 'reservation'
+      });
+
+      const totalPaid = transaction ? transaction.montant : 0;
+      let basePrice = 0;
+
+      if (booking.prestations && booking.prestations.length > 0) {
+        basePrice = booking.prestations.reduce((sum, p) => {
+          return sum + (parseInt((p.prix || '').toString().replace(/\D/g, ''), 10) || 0);
+        }, 0);
+      } else if (booking.typePrestation && booking.typePrestation.prix) {
+        basePrice = parseInt(booking.typePrestation.prix.toString().replace(/\D/g, ''), 10) || totalPaid;
+      } else if (totalPaid > 0) {
+        basePrice = Math.floor((totalPaid * 0.98) / 1.12);
+      }
+
+      const payoutAmount = basePrice;
+      if (payoutAmount <= 0) {
+        console.warn(`[PAYMENT SERVICE] Montant de Payout invalide (${payoutAmount}) pour la réservation ${booking.reference}`);
+        return null;
+      }
+
+      const commission = Math.floor(basePrice * 0.10);
+      console.log(`[PAYMENT SERVICE] Exécution du reversement pour la réservation ${booking.reference} : ${payoutAmount} XAF (Commission: ${commission} XAF sur prix de base ${basePrice} XAF)`);
+
+      const pawapayService = require('./pawapay.service');
+      const crypto = require('crypto');
+
+      let payoutPhone = booking.salon.phone;
+      if (booking.salon.paymentConfig && booking.salon.paymentConfig.payoutMtnNumber) {
+        payoutPhone = booking.salon.paymentConfig.payoutMtnNumber;
+      } else if (booking.salon.paymentConfig && booking.salon.paymentConfig.payoutMomoNumber) {
+        payoutPhone = booking.salon.paymentConfig.payoutMomoNumber;
+      }
+
+      let detectedProvider = 'MTN_MOMO_CMR';
+      try {
+        const prediction = await pawapayService.predictProvider(payoutPhone);
+        if (prediction && prediction.provider) {
+          detectedProvider = prediction.provider;
+          if (detectedProvider === 'ORANGE_CMR') {
+            console.warn(`[PAYMENT SERVICE] Provider prédit est Orange, forçage à MTN_MOMO_CMR car Orange n'est pas supporté par PawaPay.`);
+            detectedProvider = 'MTN_MOMO_CMR';
+          }
+        }
+      } catch (e) {
+        console.warn(`[PAYMENT SERVICE] Impossible de prédire le provider, utilisation par défaut.`);
+      }
+
+      const payoutId = crypto.randomUUID();
+
+      const payoutRecord = new PayoutTransaction({
+        salonId: booking.salon._id,
+        rendezvousId: booking._id,
+        pawapayPayoutId: payoutId,
+        montant: payoutAmount,
+        devise: 'XAF',
+        statut: 'PENDING'
+      });
+      await payoutRecord.save();
+
+      try {
+        await pawapayService.initiatePayout({
+          payoutId,
+          amount: payoutAmount,
+          phone: payoutPhone,
+          provider: detectedProvider,
+          clientReferenceId: booking.reference,
+          description: `RDV ${booking.reference}`
+        });
+      } catch (payoutError) {
+        payoutRecord.statut = 'FAILED';
+        payoutRecord.failureReason = payoutError.message || 'Erreur inconnue';
+        await payoutRecord.save();
+        console.error(`[PAYMENT SERVICE] Échec de l'initiation du reversement: ${payoutError.message}`);
+      }
+
+      return payoutRecord;
+    } catch (error) {
+      console.error('Erreur executeBookingPayout:', error);
       throw error;
     }
   }

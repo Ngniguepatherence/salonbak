@@ -49,6 +49,9 @@ const transactionSchema = new mongoose.Schema({
     type: Number,
     default: 30,
   },
+  failureReason: {
+    type: String,
+  },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Transaction', transactionSchema);

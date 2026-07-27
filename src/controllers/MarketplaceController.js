@@ -748,3 +748,50 @@ exports.getClientLoyalty = async (req, res, next) => {
     next(err);
   }
 };
+
+// POST /api/marketplace/bookings/:id/confirm-completion
+exports.confirmBookingCompletion = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.appUser || !req.appUser.telephone) {
+      return res.status(401).json({ success: false, message: 'Non autorisé' });
+    }
+
+    const clients = await Client.find({ telephone: req.appUser.telephone });
+    const clientIds = clients.map(c => c._id.toString());
+
+    const booking = await Rendezvous.findById(id)
+      .populate('salon')
+      .populate('typePrestation')
+      .populate('prestations');
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Réservation introuvable' });
+    }
+
+    // Vérifier que la réservation appartient au client connecté
+    const bookingClientId = booking.client?._id ? booking.client._id.toString() : booking.client?.toString();
+    const isOwner = clientIds.includes(bookingClientId);
+    if (!isOwner) {
+      return res.status(403).json({ success: false, message: 'Cette réservation ne vous appartient pas' });
+    }
+
+    // Marquer la réservation comme terminée / honorée
+    booking.statut = 'completed';
+    await booking.save();
+
+    // Déclencher le reversement Payout au salon si le paiement a été fait en ligne
+    const paymentService = require('../services/payment.service');
+    await paymentService.executeBookingPayout(booking);
+
+    res.status(200).json({
+      success: true,
+      message: 'Prestation confirmée avec succès. Le paiement a été débloqué au salon.',
+      data: booking
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+

@@ -54,7 +54,7 @@ const rendezVousSchema = new mongoose.Schema({
   },
   statut: {
     type: String,
-    enum: ['en_attente', 'confirme', 'termine', 'annule', 'paid'],
+    enum: ['en_attente', 'confirme', 'termine', 'completed', 'annule', 'paid'],
     default: 'en_attente',
   },
   source: {

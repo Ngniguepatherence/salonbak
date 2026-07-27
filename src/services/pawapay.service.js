@@ -17,6 +17,25 @@ class PawapayService {
   }
 
   /**
+   * Nettoie et formate le customerMessage selon les exigences pawaPay:
+   * Seuls les caractères alphanumériques et les espaces sont autorisés, entre 4 et 22 caractères.
+   */
+  sanitizeCustomerMessage(msg, fallback = 'BeautyFlow Payment') {
+    let source = msg || fallback;
+    // Supprimer les accents (é -> e, è -> e, etc.)
+    let clean = source.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // Ne garder que les caractères alphanumériques et les espaces
+    clean = clean.replace(/[^a-zA-Z0-9 ]/g, '');
+    // Nettoyer les espaces multiples
+    clean = clean.replace(/\s+/g, ' ').trim();
+
+    if (clean.length < 4) {
+      clean = (clean || fallback).padEnd(4, 'X');
+    }
+    return clean.slice(0, 22);
+  }
+
+  /**
    * Initie un paiement USSD Push (Deposit V2)
    * Doc V2: POST /v2/deposits
    */
@@ -40,14 +59,8 @@ class PawapayService {
         cleanPhone = '237' + cleanPhone; // code pays Cameroun par défaut
       }
 
-      // Le message client doit faire entre 4 et 22 caractères
-      let customerMessage = 'BeautyFlow Payment';
-      if (description) {
-        customerMessage = description.slice(0, 22);
-        if (customerMessage.length < 4) {
-          customerMessage = customerMessage.padEnd(4, ' ');
-        }
-      }
+      // Le message client doit faire entre 4 et 22 caractères (uniquement alphanumérique + espace)
+      const customerMessage = this.sanitizeCustomerMessage(description, 'BeautyFlow Payment');
 
       const payload = {
         depositId,
@@ -112,38 +125,56 @@ class PawapayService {
    * Initie un transfert d'argent (Payout V2) - Utile pour payer les salons (Marketplace)
    * Doc V2: POST /v2/payouts
    */
-  async initiatePayout({ payoutId, amount, phone, description, provider }) {
+  async initiatePayout({
+    payoutId,
+    amount,
+    phone,
+    provider,
+    description,
+    clientReferenceId,
+    currency = 'XAF',
+    customerMessage: customMessage,
+    metadata,
+    recipientType = 'MMO'
+  }) {
+    let cleanPhone = phone ? phone.replace(/\D/g, '') : '';
+    if (cleanPhone.startsWith('237')) {
+      // Déjà formaté avec le code pays
+    } else if (cleanPhone.length === 9) {
+      cleanPhone = '237' + cleanPhone;
+    }
+
+    const customerMessage = this.sanitizeCustomerMessage(customMessage || description, 'BeautyFlow Payout');
+    const refId = clientReferenceId || payoutId;
+
     if (!this.apiToken) {
-      console.log(`[PAWAPAY MOCK] Payout initié : ${amount} XAF vers ${phone} (Provider: ${provider})`);
+      console.log(`[PAWAPAY MOCK] Payout initié : ${amount} ${currency} au ${cleanPhone} (Ref: ${refId}, Provider: ${provider})`);
       return {
         payoutId,
-        status: 'SUBMITTED'
+        status: 'SUBMITTED',
+        clientReferenceId: refId
       };
     }
 
     try {
-      let cleanPhone = phone.replace(/\D/g, '');
-      if (cleanPhone.length === 9 && !cleanPhone.startsWith('237')) {
-        cleanPhone = '237' + cleanPhone;
-      }
-
-      let customerMessage = 'BeautyFlow Payout';
-      if (description) {
-        customerMessage = description.slice(0, 22).padEnd(4, ' ');
-      }
-
       const payload = {
         payoutId,
-        amount: amount.toString(),
-        currency: 'XAF',
         recipient: {
-          type: 'MMO',
+          type: recipientType,
           accountDetails: {
             phoneNumber: cleanPhone,
-            provider: provider || 'MTN_MOMO_CMR'
+            provider: provider
           }
-        }
+        },
+        amount: amount.toString(),
+        currency: currency,
+        clientReferenceId: refId,
+        customerMessage
       };
+
+      if (metadata) {
+        payload.metadata = metadata;
+      }
 
       console.log('[PAWAPAY API V2] Envoi de la requête de Payout :', JSON.stringify(payload, null, 2));
 
@@ -157,6 +188,33 @@ class PawapayService {
     } catch (error) {
       console.error('Erreur initiatePayout pawaPay:', error?.response?.data || error.message);
       throw new Error(error?.response?.data?.message || 'Erreur lors de l\'initiation du Payout chez pawaPay');
+    }
+  }
+
+  /**
+   * Vérifie le statut d'un Payout (V2)
+   * Doc V2: GET /v2/payouts/{payoutId}
+   */
+  async getPayoutStatus(payoutId) {
+    if (!this.apiToken) {
+      console.log(`[PAWAPAY MOCK] Vérification Payout : ${payoutId}`);
+      return {
+        payoutId,
+        status: 'COMPLETED',
+      };
+    }
+
+    try {
+      const response = await axios.get(
+        `${this.apiBaseUrl}/v2/payouts/${payoutId}`,
+        { headers: this.getHeaders() }
+      );
+
+      const data = Array.isArray(response.data) ? response.data[0] : response.data;
+      return data;
+    } catch (error) {
+      console.error('Erreur getPayoutStatus pawaPay:', error?.response?.data || error.message);
+      throw new Error(error?.response?.data?.message || 'Erreur lors de la vérification du Payout chez pawaPay');
     }
   }
 
