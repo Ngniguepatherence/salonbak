@@ -22,7 +22,7 @@ if (typeof multerStorageCloudinary === 'function') {
 
 // Configuration universelle des options de stockage selon la version du package
 const storageOptions = {
-  cloudinary: cloudinary,
+  cloudinary: require('cloudinary'),
 };
 
 if (typeof multerStorageCloudinary.CloudinaryStorage === 'function') {
