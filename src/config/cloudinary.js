@@ -29,14 +29,12 @@ if (typeof multerStorageCloudinary.CloudinaryStorage === 'function') {
   // Options pour la version 4.x (format imbriqué)
   storageOptions.params = {
     folder: 'beautyflow',
-    allowed_formats: ['jpg', 'png', 'jpeg', 'webp'],
-    transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
+    allowed_formats: ['jpg', 'png', 'jpeg', 'webp']
   };
 } else {
   // Options pour la version 2.x/3.x (format plat)
   storageOptions.folder = 'beautyflow';
   storageOptions.allowedFormats = ['jpg', 'png', 'jpeg', 'webp'];
-  storageOptions.transformation = [{ width: 1000, height: 1000, crop: 'limit' }];
 }
 
 const storage = new CloudinaryStorage(storageOptions);
