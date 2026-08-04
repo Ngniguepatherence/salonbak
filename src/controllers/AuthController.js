@@ -248,12 +248,12 @@ exports.initiateGoogleAuth = (req, res, next) => {
   try {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const redirectParam = req.query.redirect || '';
-    
+
     // Si pas de vrai CLIENT_ID en dev, ou s'il s'agit d'un secret, on utilise le mock direct
-    const isMock = !clientId || 
-                   clientId === 'dummy_client_id_for_dev' || 
-                   clientId.startsWith('GOCSPX-') || 
-                   !clientId.includes('.apps.googleusercontent.com');
+    const isMock = !clientId ||
+      clientId === 'dummy_client_id_for_dev' ||
+      clientId.startsWith('GOCSPX-') ||
+      !clientId.includes('.apps.googleusercontent.com');
 
     if (isMock) {
       console.warn('⚠️ Google Client ID non configuré ou invalide (détecté comme clé secrète). Utilisation du mock en dev.');
@@ -277,14 +277,14 @@ exports.initiateGoogleAuth = (req, res, next) => {
 // @route   GET /api/auth/google/callback
 // @access  Public
 exports.googleAuthCallback = async (req, res, next) => {
-  const sassUrl = process.env.FRONTEND_URL || 'https://app.westdigitalhub.com';
+  const sassUrl = process.env.FRONTEND_URL || 'http://localhost:8080'; //'https://app.westdigitalhub.com';
   const marketplaceUrl = process.env.FRONTEND_URL_MARKETPLACE || 'https://beautyflowafrica.com';
   const { code, state } = req.query;
-  const targetRedirectUrl = state || `${sassUrl}/pro/onboarding`;
+  const targetRedirectUrl = state || `${sassUrl}/`;
 
   try {
     if (!code) {
-      const defaultUrl = `${sassUrl}/pro/onboarding`;
+      const defaultUrl = `${sassUrl}/`;
       const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
       const separator = safeRedirectUrl.includes('?') ? '&' : '?';
       return res.redirect(`${safeRedirectUrl}${separator}error=no_code`);
@@ -311,7 +311,7 @@ exports.googleAuthCallback = async (req, res, next) => {
     }
 
     const { email, name, sub: googleId, picture } = payload;
-    
+
     // Detect if this is a marketplace user request
     const isMarketplace = targetRedirectUrl.includes('/explorer') || targetRedirectUrl.includes('/booking');
 
@@ -376,14 +376,14 @@ exports.googleAuthCallback = async (req, res, next) => {
     const salonExists = user.salon ? 'true' : 'false';
 
     // Redirect to frontend with token
-    const defaultUrl = `${sassUrl}/pro/onboarding`;
+    const defaultUrl = `${sassUrl}/`;
     const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
     const separator = safeRedirectUrl.includes('?') ? '&' : '?';
     res.redirect(`${safeRedirectUrl}${separator}token=${jwtToken}&salonExists=${salonExists}`);
 
   } catch (err) {
     console.error('Erreur google callback:', err);
-    const defaultUrl = `${sassUrl}/pro/onboarding`;
+    const defaultUrl = `${sassUrl}/`;
     const safeRedirectUrl = isSafeRedirect(targetRedirectUrl) ? targetRedirectUrl : defaultUrl;
     const separator = safeRedirectUrl.includes('?') ? '&' : '?';
     res.redirect(`${safeRedirectUrl}${separator}error=auth_failed`);
@@ -426,7 +426,7 @@ exports.googleTokenLogin = async (req, res, next) => {
 
     const { email, name, sub: googleId, picture } = payload;
     const targetRole = req.body.role === 'affiliate' ? 'affiliate' : 'owner';
-    
+
     let user;
     if (targetRole === 'affiliate') {
       user = await Affiliate.findOne({ email });
@@ -668,7 +668,7 @@ exports.createAffiliateCode = async (req, res, next) => {
       if (code.length < 3) {
         return res.status(400).json({ success: false, message: 'Le code doit contenir au moins 3 caractères (lettres ou chiffres)' });
       }
-      
+
       const existing = await Affiliate.findOne({ affiliateCode: code });
       if (existing) {
         return res.status(400).json({ success: false, message: "Ce code d'affiliation est déjà utilisé par un autre partenaire." });
