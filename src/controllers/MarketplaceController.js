@@ -634,14 +634,13 @@ exports.getSalonSharePreview = async (req, res) => {
     const isObjectId = slug.match(/^[0-9a-fA-F]{24}$/);
 
     const query = isObjectId ? { _id: slug } : { slug: slug };
-    query.isActive = true;
 
     const salon = await Salon.findOne(query);
     if (!salon) {
       return res.status(404).send('Salon introuvable');
     }
 
-    const salonName = salon.name || 'Salon';
+    const salonName = salon.name || salon.nom || 'Salon';
 
     // Resolve language (accept-language header or query parameter or default country fallback)
     const acceptLang = req.headers['accept-language'] || '';
@@ -663,7 +662,31 @@ exports.getSalonSharePreview = async (req, res) => {
 
     const title = `${salonName} — ${titleSuffix}`;
     const description = salon.description || defaultDesc;
-    const bannerUrl = salon.bannerUrl || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop';
+
+    // Extract best salon image: cover banner > first gallery photo > logo
+    let rawImage = salon.branding?.bannerUrl || 
+      salon.bannerUrl || 
+      (salon.galleryUrls && salon.galleryUrls[0]) || 
+      (salon.branding?.gallery && salon.branding.gallery[0]) || 
+      (salon.photos && salon.photos[0]) || 
+      salon.branding?.logoUrl || 
+      salon.logoUrl || 
+      salon.logo || 
+      '';
+
+    const baseUrl = (process.env.BACKEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+    const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+
+    let previewImage = rawImage;
+    if (previewImage && !previewImage.startsWith('http://') && !previewImage.startsWith('https://')) {
+      const cleanPath = previewImage.startsWith('/') ? previewImage : `/${previewImage}`;
+      previewImage = `${baseUrl}${cleanPath}`;
+    }
+    if (!previewImage) {
+      previewImage = `${frontendUrl}/beautyflow-banner.png`;
+    }
+
+    const targetBookingUrl = `${frontendUrl}/booking/${salon.slug || slug}?lang=${isEnglish ? 'en' : 'fr'}`;
 
     // Serve HTML page populated with Open Graph meta tags for bot previews
     res.setHeader('Content-Type', 'text/html');
@@ -671,28 +694,34 @@ exports.getSalonSharePreview = async (req, res) => {
 <html lang="${isEnglish ? 'en' : 'fr'}">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
   <meta name="description" content="${description}">
   
-  <!-- Open Graph -->
+  <!-- Open Graph / Facebook / WhatsApp / iMessage -->
+  <meta property="og:site_name" content="BeautyFlow">
   <meta property="og:title" content="${title}">
   <meta property="og:description" content="${description}">
-  <meta property="og:image" content="${bannerUrl}">
+  <meta property="og:image" content="${previewImage}">
+  <meta property="og:image:secure_url" content="${previewImage}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:url" content="${targetBookingUrl}">
   <meta property="og:type" content="website">
   
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="${title}">
   <meta name="twitter:description" content="${description}">
-  <meta name="twitter:image" content="${bannerUrl}">
+  <meta name="twitter:image" content="${previewImage}">
+
+  <meta http-equiv="refresh" content="0;url=${targetBookingUrl}">
 </head>
 <body>
   <h1>${salonName}</h1>
   <p>${description}</p>
   <script>
-    // Redirect standard browsers back to the frontend SPA route
-    const frontendUrl = "${process.env.FRONTEND_URL_MARKETPLACE || 'https://beautyflowafrica.com'}";
-    window.location.href = frontendUrl + "/booking/${slug}?lang=${isEnglish ? 'en' : 'fr'}";
+    window.location.href = "${targetBookingUrl}";
   </script>
 </body>
 </html>`);
