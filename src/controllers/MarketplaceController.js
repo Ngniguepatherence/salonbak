@@ -678,6 +678,9 @@ exports.getSalonSharePreview = async (req, res) => {
     const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
 
     let previewImage = rawImage;
+    if (previewImage && previewImage.startsWith('data:')) {
+      previewImage = '';
+    }
     if (previewImage && !previewImage.startsWith('http://') && !previewImage.startsWith('https://')) {
       const cleanPath = previewImage.startsWith('/') ? previewImage : `/${previewImage}`;
       previewImage = `${baseUrl}${cleanPath}`;
