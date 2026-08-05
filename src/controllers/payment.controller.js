@@ -238,6 +238,7 @@ exports.createBookingDeposit = async (req, res, next) => {
       provider
     });
 
+
     res.status(200).json({
       success: true,
       message: 'Demande de paiement de réservation initiée.',

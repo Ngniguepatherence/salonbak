@@ -9,7 +9,8 @@ const OWNER_EDITABLE_FIELDS = [
   'name', 'slogan', 'description', 'logoUrl', 'bannerUrl', 'galleryUrls', 'typeEtablissement',
   'phone', 'email',
   'address', 'ville', 'pays', 'devise', 'horaires', 'availability',
-  'joursRappelInactivite', 'joursRappelSuivi','configFidelite', 'location', 'paymentConfig'
+  'joursRappelInactivite', 'joursRappelSuivi','configFidelite', 'location', 'paymentConfig',
+  'isHidden', 'hidden'
 ];
 
 // Champs que seul l'admin peut toucher

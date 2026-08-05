@@ -309,9 +309,9 @@ exports.toggleFavorite = async (req, res) => {
 // 4. Salons: List
 exports.getSalons = async (req, res) => {
   try {
-    // Return only active salons
-    const salons = await Salon.find({ isActive: true })
-      .select('name slug address ville pays typeEtablissement logoUrl bannerUrl galleryUrls description phone email availability horaires location');
+    // Return only active and non-hidden salons
+    const salons = await Salon.find({ isActive: true, isHidden: { $ne: true }, hidden: { $ne: true } })
+      .select('name slug address ville pays typeEtablissement logoUrl bannerUrl galleryUrls description phone email availability horaires location isHidden hidden');
 
     // We can map these so the frontend receives them in the expected format
     res.status(200).json({ success: true, data: salons });
@@ -332,6 +332,19 @@ exports.getSalonBySlug = async (req, res) => {
     const salon = await Salon.findOne(query);
     if (!salon) {
       return res.status(404).json({ success: false, message: 'Salon introuvable' });
+    }
+
+    if (salon.isHidden || salon.hidden) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          ...salon.toObject(),
+          isHidden: true,
+          hidden: true,
+          prestations: [],
+          staff: []
+        }
+      });
     }
 
     await salon.checkSubscriptionTransition();

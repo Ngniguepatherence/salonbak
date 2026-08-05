@@ -211,6 +211,14 @@ const salonSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  isHidden: {
+    type: Boolean,
+    default: false,
+  },
+  hidden: {
+    type: Boolean,
+    default: false,
+  },
   limits: {
     maxCustomers: { type: Number, default: 300 },
     maxStaff: { type: Number, default: 2 },
@@ -225,7 +233,7 @@ const salonSchema = new mongoose.Schema({
       trim: true,
       default: '',
       validate: {
-        validator: function(v) {
+        validator: function (v) {
           if (!v) return true;
           const clean = v.replace(/\D/g, '');
           // Accept 9-digit local Cameroonian phone numbers or 12-digit international format (with 237)
@@ -249,7 +257,7 @@ const salonSchema = new mongoose.Schema({
       trim: true,
       default: '',
       validate: {
-        validator: function(v) {
+        validator: function (v) {
           if (!v) return true;
           const clean = v.replace(/\D/g, '');
           return clean.length === 9 || (clean.length === 12 && clean.startsWith('237'));
@@ -267,7 +275,7 @@ const salonSchema = new mongoose.Schema({
       trim: true,
       default: '',
       validate: {
-        validator: function(v) {
+        validator: function (v) {
           if (!v) return true;
           const clean = v.replace(/\D/g, '');
           return clean.length === 9 || (clean.length === 12 && clean.startsWith('237'));
