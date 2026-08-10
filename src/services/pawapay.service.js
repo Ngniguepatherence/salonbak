@@ -3,7 +3,8 @@ const axios = require('axios');
 class PawapayService {
   constructor() {
     this.apiToken = process.env.PAWAPAY_API_TOKEN;
-    this.apiBaseUrl = process.env.PAWAPAY_API_BASE_URL;
+    const baseUrl = process.env.PAWAPAY_API_BASE_URL || 'https://api.sandbox.pawapay.io';
+    this.apiBaseUrl = baseUrl.replace(/\/+$/, '');
   }
 
   /**
@@ -51,12 +52,11 @@ class PawapayService {
     }
 
     try {
-      // S'assurer que le numéro de téléphone commence par le code pays sans "+"
-      let cleanPhone = phone.replace(/\D/g, '');
-      if (cleanPhone.startsWith('237')) {
-        // Déjà formaté avec le code pays
-      } else if (cleanPhone.length === 9) {
-        cleanPhone = '237' + cleanPhone; // code pays Cameroun par défaut
+      let cleanPhone = phone ? phone.replace(/\D/g, '') : '';
+      if (cleanPhone.startsWith('00237')) {
+        cleanPhone = cleanPhone.slice(2);
+      } else if (!cleanPhone.startsWith('237') && cleanPhone.length === 9) {
+        cleanPhone = '237' + cleanPhone;
       }
 
       // Le message client doit faire entre 4 et 22 caractères (uniquement alphanumérique + espace)
@@ -79,16 +79,23 @@ class PawapayService {
 
       console.log('[PAWAPAY API V2] Envoi de la requête de dépôt :', JSON.stringify(payload, null, 2));
 
-      const response = await axios.post(
-        `${this.apiBaseUrl}/v2/deposits`,
-        payload,
-        { headers: this.getHeaders() }
-      );
+      const response = await fetch(`${this.apiBaseUrl}/v2/deposits`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify(payload)
+      });
 
-      return response.data;
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error('Erreur HTTP initiateDeposit pawaPay:', data);
+        throw new Error(data?.message || `Erreur HTTP ${response.status} lors de l'initiation du dépôt chez pawaPay`);
+      }
+
+      return data;
     } catch (error) {
-      console.error('Erreur initiateDeposit pawaPay:', error?.response?.data || error.message);
-      throw new Error(error?.response?.data?.message || 'Erreur lors de l\'initiation du dépôt chez pawaPay');
+      console.error('Erreur initiateDeposit pawaPay:', error.message);
+      throw error;
     }
   }
 
@@ -107,17 +114,23 @@ class PawapayService {
     }
 
     try {
-      const response = await axios.get(
-        `${this.apiBaseUrl}/v2/deposits/${depositId}`,
-        { headers: this.getHeaders() }
-      );
+      const response = await fetch(`${this.apiBaseUrl}/v2/deposits/${depositId}`, {
+        method: 'GET',
+        headers: this.getHeaders()
+      });
 
-      // La réponse de pawaPay peut être un tableau ou un objet simple
-      const data = Array.isArray(response.data) ? response.data[0] : response.data;
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        console.error('Erreur HTTP getDepositStatus pawaPay:', responseData);
+        throw new Error(responseData?.message || `Erreur HTTP ${response.status} lors de la vérification du dépôt chez pawaPay`);
+      }
+
+      const data = Array.isArray(responseData) ? responseData[0] : responseData;
       return data;
     } catch (error) {
-      console.error('Erreur getDepositStatus pawaPay:', error?.response?.data || error.message);
-      throw new Error(error?.response?.data?.message || 'Erreur lors de la vérification du dépôt chez pawaPay');
+      console.error('Erreur getDepositStatus pawaPay:', error.cause?.message || error.message);
+      throw error;
     }
   }
 
@@ -138,9 +151,9 @@ class PawapayService {
     recipientType = 'MMO'
   }) {
     let cleanPhone = phone ? phone.replace(/\D/g, '') : '';
-    if (cleanPhone.startsWith('237')) {
-      // Déjà formaté avec le code pays
-    } else if (cleanPhone.length === 9) {
+    if (cleanPhone.startsWith('00237')) {
+      cleanPhone = cleanPhone.slice(2);
+    } else if (!cleanPhone.startsWith('237') && cleanPhone.length === 9) {
       cleanPhone = '237' + cleanPhone;
     }
 
@@ -178,16 +191,23 @@ class PawapayService {
 
       console.log('[PAWAPAY API V2] Envoi de la requête de Payout :', JSON.stringify(payload, null, 2));
 
-      const response = await axios.post(
-        `${this.apiBaseUrl}/v2/payouts`,
-        payload,
-        { headers: this.getHeaders() }
-      );
+      const response = await fetch(`${this.apiBaseUrl}/v2/payouts`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify(payload)
+      });
 
-      return response.data;
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error('Erreur HTTP initiatePayout pawaPay:', data);
+        throw new Error(data?.message || `Erreur HTTP ${response.status} lors de l'initiation du Payout chez pawaPay`);
+      }
+      console.log(data);
+      return data;
     } catch (error) {
-      console.error('Erreur initiatePayout pawaPay:', error?.response?.data || error.message);
-      throw new Error(error?.response?.data?.message || 'Erreur lors de l\'initiation du Payout chez pawaPay');
+      console.error('Erreur initiatePayout pawaPay:', error.message);
+      throw error;
     }
   }
 
@@ -205,16 +225,24 @@ class PawapayService {
     }
 
     try {
-      const response = await axios.get(
-        `${this.apiBaseUrl}/v2/payouts/${payoutId}`,
-        { headers: this.getHeaders() }
-      );
+      const response = await fetch(`${this.apiBaseUrl}/v2/payouts/${payoutId}`, {
+        method: 'GET',
+        headers: this.getHeaders()
+      });
 
-      const data = Array.isArray(response.data) ? response.data[0] : response.data;
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        console.error('Erreur HTTP getPayoutStatus pawaPay:', responseData);
+        throw new Error(responseData?.message || `Erreur HTTP ${response.status} lors de la vérification du Payout chez pawaPay`);
+      }
+
+      const data = Array.isArray(responseData) ? responseData[0] : responseData;
+      console.log('[PAWAPAY API V2] Statut du Payout :', data);
       return data;
     } catch (error) {
-      console.error('Erreur getPayoutStatus pawaPay:', error?.response?.data || error.message);
-      throw new Error(error?.response?.data?.message || 'Erreur lors de la vérification du Payout chez pawaPay');
+      console.error('Erreur getPayoutStatus pawaPay:', error.message);
+      throw error;
     }
   }
 

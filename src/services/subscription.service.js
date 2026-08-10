@@ -154,10 +154,6 @@ class SubscriptionService {
                     const prediction = await pawapayService.predictProvider(payoutPhone);
                     if (prediction && prediction.provider) {
                       detectedProvider = prediction.provider;
-                      if (detectedProvider === 'ORANGE_CMR') {
-                        console.warn(`[AFFILIATE SYSTEM] Provider predicted is Orange, forcing to MTN_MOMO_CMR.`);
-                        detectedProvider = 'MTN_MOMO_CMR';
-                      }
                     }
                   } catch (e) {
                     console.warn(`[AFFILIATE SYSTEM] Predict provider failed, using default: ${detectedProvider}`);
@@ -193,6 +189,22 @@ class SubscriptionService {
                   await affiliate.save();
                   
                   console.log(`[AFFILIATE SYSTEM] Affiliate payout initiated successfully for amount: ${commissionAmount} XAF`);
+
+                  // Auto-vérification automatique en tâche de fond après 10 secondes
+                  const paymentService = require('./payment.service');
+                  setTimeout(async () => {
+                    try {
+                      console.log(`[AFFILIATE SYSTEM] Auto-vérification du Payout ${payoutId}...`);
+                      const statusData = await pawapayService.getPayoutStatus(payoutId);
+                      const status = statusData?.status || statusData?.payoutStatus;
+                      if (status && status !== 'PENDING' && status !== 'SUBMITTED') {
+                        const failureReason = statusData.failureReason?.failureMessage || statusData.failureReason;
+                        await paymentService.processCompletedPayout(payoutId, status, failureReason);
+                      }
+                    } catch (autoCheckError) {
+                      console.error(`[AFFILIATE SYSTEM] Échec de l'auto-vérification du Payout ${payoutId}:`, autoCheckError.message);
+                    }
+                  }, 10000);
                 } catch (payoutError) {
                   payoutRecord.statut = 'FAILED';
                   payoutRecord.failureReason = payoutError.message || 'Erreur lors de l\'initiation du décaissement';

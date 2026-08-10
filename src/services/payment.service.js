@@ -186,10 +186,6 @@ class PaymentService {
         const prediction = await pawapayService.predictProvider(payoutPhone);
         if (prediction && prediction.provider) {
           detectedProvider = prediction.provider;
-          if (detectedProvider === 'ORANGE_CMR') {
-            console.warn(`[PAYMENT SERVICE] Provider prédit est Orange, forçage à MTN_MOMO_CMR car Orange n'est pas supporté par PawaPay.`);
-            detectedProvider = 'MTN_MOMO_CMR';
-          }
         }
       } catch (e) {
         console.warn(`[PAYMENT SERVICE] Impossible de prédire le provider, utilisation par défaut.`);
@@ -216,6 +212,25 @@ class PaymentService {
           clientReferenceId: booking.reference,
           description: `RDV ${booking.reference}`
         });
+
+        // Vérification automatique en tâche de fond après 10 secondes (Auto-Polling)
+        setTimeout(async () => {
+          try {
+            console.log(`[PAYMENT SERVICE] Auto-vérification du statut du Payout ${payoutId}...`);
+            const statusData = await pawapayService.getPayoutStatus(payoutId);
+            const status = statusData?.status || statusData?.payoutStatus;
+            console.log(`[PAYMENT SERVICE] Statut automatique récupéré pour Payout ${payoutId}: ${status}`);
+
+            const isTerminal = ['COMPLETED', 'FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(status);
+            if (isTerminal) {
+              const failureReason = statusData.failureReason?.failureMessage || statusData.failureReason;
+              await this.processCompletedPayout(payoutId, status, failureReason);
+            }
+          } catch (autoCheckError) {
+            console.error(`[PAYMENT SERVICE] Échec de l'auto-vérification du Payout ${payoutId}:`, autoCheckError.message);
+          }
+        }, 10000);
+
       } catch (payoutError) {
         payoutRecord.statut = 'FAILED';
         payoutRecord.failureReason = payoutError.message || 'Erreur inconnue';

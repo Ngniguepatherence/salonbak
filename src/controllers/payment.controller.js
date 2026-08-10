@@ -134,16 +134,42 @@ exports.createDeposit = async (req, res, next) => {
       console.warn("Could not fetch provider info for UI", err.message);
     }
 
+    // Lancer des vérifications automatiques en arrière-plan (Auto-polling à 15s, 45s et 90s)
+    [15000, 45000, 90000].forEach((delay) => {
+      setTimeout(async () => {
+        try {
+          const statusData = await pawapayService.getDepositStatus(depositId);
+          const status = statusData?.status;
+          console.log(`[DEPOSIT AUTO-CHECK] (${delay / 1000}s) Statut pour ${depositId}: ${status}`);
+          const isTerminal = ['COMPLETED', 'FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(status);
+          if (isTerminal) {
+            const failureReason = statusData.failureReason?.failureMessage || statusData.failureReason;
+            await paymentService.processCompletedDeposit(depositId, status, reference, failureReason);
+          }
+        } catch (e) {
+          console.warn(`[DEPOSIT AUTO-CHECK FAIL] ${depositId}:`, e.message);
+        }
+      }, delay);
+    });
+
+    const isOrange = provider === 'ORANGE_CMR';
+    const instructions = isOrange
+      ? 'Pour valider votre paiement Orange Money, composez le #150*50# sur votre téléphone ou ouvrez Orange Max It pour saisir votre code PIN.'
+      : 'Demande de paiement initiée. Saisissez votre PIN de validation sur votre téléphone.';
+
     res.status(200).json({
       success: true,
-      message: 'Demande de paiement initiée. Saisissez votre PIN de validation sur votre téléphone.',
+      message: instructions,
       data: {
         depositId,
         reference,
-        status: pawaPayResult.status, // ex: SUBMITTED, ACCEPTED
+        status: pawaPayResult.status,
+        provider,
+        isOrange,
+        ussdCode: isOrange ? '#150*50#' : null,
+        instructions,
         verifyUrl,
-        providerInfo, // Info utile pour l'interface de validation frontend
-        // En mode développement sans token pawaPay, on renvoie le lien de simulation
+        providerInfo,
         paymentLink: !process.env.PAWAPAY_API_TOKEN
           ? `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/payments/simulate-payment?ref=${reference}&salonId=${targetSalon._id}&returnUrl=${encodeURIComponent(`${process.env.FRONTEND_URL || 'http://localhost:8080'}/login?payment=success`)}`
           : null
@@ -239,13 +265,40 @@ exports.createBookingDeposit = async (req, res, next) => {
     });
 
 
+    // Lancer des vérifications automatiques en arrière-plan (Auto-polling à 15s, 45s et 90s)
+    [15000, 45000, 90000].forEach((delay) => {
+      setTimeout(async () => {
+        try {
+          const statusData = await pawapayService.getDepositStatus(depositId);
+          const status = statusData?.status;
+          console.log(`[BOOKING DEPOSIT AUTO-CHECK] (${delay / 1000}s) Statut pour ${depositId}: ${status}`);
+          const isTerminal = ['COMPLETED', 'FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(status);
+          if (isTerminal) {
+            const failureReason = statusData.failureReason?.failureMessage || statusData.failureReason;
+            await paymentService.processCompletedDeposit(depositId, status, reference, failureReason);
+          }
+        } catch (e) {
+          console.warn(`[BOOKING DEPOSIT AUTO-CHECK FAIL] ${depositId}:`, e.message);
+        }
+      }, delay);
+    });
+
+    const isOrange = provider === 'ORANGE_CMR';
+    const instructions = isOrange
+      ? 'Pour valider votre paiement Orange Money, composez le #150*50# sur votre téléphone ou ouvrez Orange Max It pour saisir votre code PIN.'
+      : 'Demande de paiement de réservation initiée. Saisissez votre PIN de validation sur votre téléphone.';
+
     res.status(200).json({
       success: true,
-      message: 'Demande de paiement de réservation initiée.',
+      message: instructions,
       data: {
         depositId,
         reference,
-        status: pawaPayResult.status
+        status: pawaPayResult.status,
+        provider,
+        isOrange,
+        ussdCode: isOrange ? '#150*50#' : null,
+        instructions
       }
     });
 

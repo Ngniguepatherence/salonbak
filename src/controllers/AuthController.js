@@ -120,7 +120,7 @@ exports.login = async (req, res, next) => {
       if (!salon.isActive || new Date() > new Date(salon.abonnement?.dateFin)) {
         return res.status(403).json({
           success: false,
-          message: 'Abonnement expiré — veuillez contacter LeaderBright',
+          message: 'Abonnement expiré — veuillez contacter Beautyflow',
         });
       }
     }
