@@ -86,6 +86,7 @@ class PawapayService {
       });
 
       const data = await response.json();
+      console.log(data);
 
       if (!response.ok) {
         console.error('Erreur HTTP initiateDeposit pawaPay:', data);
@@ -126,7 +127,10 @@ class PawapayService {
         throw new Error(responseData?.message || `Erreur HTTP ${response.status} lors de la vérification du dépôt chez pawaPay`);
       }
 
-      const data = Array.isArray(responseData) ? responseData[0] : responseData;
+      const rawItem = Array.isArray(responseData) ? responseData[0] : responseData;
+      const data = (rawItem && rawItem.data && typeof rawItem.data === 'object')
+        ? { ...rawItem.data, apiStatus: rawItem.status }
+        : rawItem;
       return data;
     } catch (error) {
       console.error('Erreur getDepositStatus pawaPay:', error.cause?.message || error.message);
@@ -237,7 +241,10 @@ class PawapayService {
         throw new Error(responseData?.message || `Erreur HTTP ${response.status} lors de la vérification du Payout chez pawaPay`);
       }
 
-      const data = Array.isArray(responseData) ? responseData[0] : responseData;
+      const rawItem = Array.isArray(responseData) ? responseData[0] : responseData;
+      const data = (rawItem && rawItem.data && typeof rawItem.data === 'object')
+        ? { ...rawItem.data, apiStatus: rawItem.status }
+        : rawItem;
       console.log('[PAWAPAY API V2] Statut du Payout :', data);
       return data;
     } catch (error) {

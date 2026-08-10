@@ -140,6 +140,7 @@ exports.createDeposit = async (req, res, next) => {
         try {
           const statusData = await pawapayService.getDepositStatus(depositId);
           const status = statusData?.status;
+          console.log("statusData", statusData);
           console.log(`[DEPOSIT AUTO-CHECK] (${delay / 1000}s) Statut pour ${depositId}: ${status}`);
           const isTerminal = ['COMPLETED', 'FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(status);
           if (isTerminal) {
@@ -185,7 +186,9 @@ exports.createDeposit = async (req, res, next) => {
 /**
  * Création d'un dépôt pour le paiement d'une réservation (Booking)
  * Route: POST /api/payments/booking/:rendezvousId
- */
+
+*/
+
 exports.createBookingDeposit = async (req, res, next) => {
   try {
     const { rendezvousId } = req.params;
@@ -212,7 +215,7 @@ exports.createBookingDeposit = async (req, res, next) => {
 
     let calculatedAmount = amount;
     if (basePrice > 0) {
-      const rColl = 0.02; // 1% pawaPay + 1% MMO
+      const rColl = 0.002; // 1% pawaPay + 1% MMO
       const rPayout = 0.02; // 1% pawaPay + 1% MMO
       const salonPayout = basePrice * 0.90; // Le salon reçoit 90% (10% platform commission)
       calculatedAmount = Math.ceil((basePrice + salonPayout * rPayout) / (1 - rColl));
@@ -242,19 +245,19 @@ exports.createBookingDeposit = async (req, res, next) => {
       durationDays: 0
     });
 
-    let provider = 'MTN_MOMO_CMR';
-    if (operator === 'orange') {
-      provider = 'ORANGE_CMR';
-    } else if (operator === 'mtn') {
-      provider = 'MTN_MOMO_CMR';
-    } else {
-      const cleanPhone = phone.replace(/\D/g, '');
-      const localPhone = cleanPhone.startsWith('237') ? cleanPhone.slice(3) : cleanPhone;
-      if (localPhone.startsWith('69') || localPhone.startsWith('655') || localPhone.startsWith('656') || localPhone.startsWith('657') || localPhone.startsWith('658') || localPhone.startsWith('659')) {
-        provider = 'ORANGE_CMR';
-      }
-    }
-
+    let provider = 'ORANGE_CMR';
+    // if (operator === 'orange') {
+    //   provider = 'ORANGE_CMR';
+    // } else if (operator === 'mtn') {
+    //   provider = 'MTN_MOMO_CMR';
+    // } else {
+    //   const cleanPhone = phone.replace(/\D/g, '');
+    //   const localPhone = cleanPhone.startsWith('237') ? cleanPhone.slice(3) : cleanPhone;
+    //   if (localPhone.startsWith('69') || localPhone.startsWith('655') || localPhone.startsWith('656') || localPhone.startsWith('657') || localPhone.startsWith('658') || localPhone.startsWith('659')) {
+    //     provider = 'ORANGE_CMR';
+    //   }
+    // }
+    // console.log("provider", provider);
     const pawaPayResult = await pawapayService.initiateDeposit({
       depositId,
       amount: calculatedAmount,
@@ -264,18 +267,21 @@ exports.createBookingDeposit = async (req, res, next) => {
       provider
     });
 
+    console.log("pawaPayResult", pawaPayResult);
 
     // Lancer des vérifications automatiques en arrière-plan (Auto-polling à 15s, 45s et 90s)
-    [15000, 45000, 90000].forEach((delay) => {
+    [15000].forEach((delay) => {
       setTimeout(async () => {
         try {
           const statusData = await pawapayService.getDepositStatus(depositId);
+          console.log("statusData>>>>>>>>>>>>>>>>>>", statusData);
           const status = statusData?.status;
           console.log(`[BOOKING DEPOSIT AUTO-CHECK] (${delay / 1000}s) Statut pour ${depositId}: ${status}`);
           const isTerminal = ['COMPLETED', 'FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(status);
           if (isTerminal) {
             const failureReason = statusData.failureReason?.failureMessage || statusData.failureReason;
-            await paymentService.processCompletedDeposit(depositId, status, reference, failureReason);
+            const result = await paymentService.processCompletedDeposit(depositId, status, reference, failureReason);
+            console.log("result>>>>>>>>>>>>>>>>>>", result);
           }
         } catch (e) {
           console.warn(`[BOOKING DEPOSIT AUTO-CHECK FAIL] ${depositId}:`, e.message);
