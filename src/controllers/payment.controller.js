@@ -246,17 +246,17 @@ exports.createBookingDeposit = async (req, res, next) => {
     });
 
     let provider = 'ORANGE_CMR';
-    // if (operator === 'orange') {
-    //   provider = 'ORANGE_CMR';
-    // } else if (operator === 'mtn') {
-    //   provider = 'MTN_MOMO_CMR';
-    // } else {
-    //   const cleanPhone = phone.replace(/\D/g, '');
-    //   const localPhone = cleanPhone.startsWith('237') ? cleanPhone.slice(3) : cleanPhone;
-    //   if (localPhone.startsWith('69') || localPhone.startsWith('655') || localPhone.startsWith('656') || localPhone.startsWith('657') || localPhone.startsWith('658') || localPhone.startsWith('659')) {
-    //     provider = 'ORANGE_CMR';
-    //   }
-    // }
+    if (operator === 'orange') {
+      provider = 'ORANGE_CMR';
+    } else if (operator === 'mtn') {
+      provider = 'MTN_MOMO_CMR';
+    } else {
+      const cleanPhone = phone.replace(/\D/g, '');
+      const localPhone = cleanPhone.startsWith('237') ? cleanPhone.slice(3) : cleanPhone;
+      if (localPhone.startsWith('69') || localPhone.startsWith('655') || localPhone.startsWith('656') || localPhone.startsWith('657') || localPhone.startsWith('658') || localPhone.startsWith('659')) {
+        provider = 'ORANGE_CMR';
+      }
+    }
     // console.log("provider", provider);
     const pawaPayResult = await pawapayService.initiateDeposit({
       depositId,

@@ -85,6 +85,11 @@ const clientSchema = new mongoose.Schema({
     trim: true,
     default: '',
   },
+    appUser: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AppUser',
+        default: null
+    },
     salon: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Salon',

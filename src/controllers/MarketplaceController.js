@@ -395,30 +395,52 @@ exports.createBooking = async (req, res) => {
     const totalDuration = prestations.reduce((sum, p) => sum + (p.duree || 30), 0);
     const basePrice = prestations.reduce((sum, p) => {
       const priceNum = parseInt(p.prix.replace(/\D/g, ''), 10) || 0;
-      return sum + priceNum;
+      return sum + priceNum;    // Ensure Client exists for this salon
     }, 0);
-
-    // Ensure Client exists for this salon
-    let clientPhone = telephoneClient || req.appUser.telephone;
+    let clientPhone = telephoneClient || (req.appUser ? req.appUser.telephone : null);
     if (!clientPhone) {
       return res.status(400).json({ success: false, message: 'Un numéro de téléphone est requis pour réserver.' });
     }
 
-    // Cherche le client dans ce salon via son numéro de téléphone
-    let client = await Client.findOne({ salon: salon._id, telephone: clientPhone });
+    const cleanPhoneDigits = clientPhone.replace(/\D/g, '').slice(-9);
+
+    // Sync appUser telephone if missing
+    if (req.appUser && (!req.appUser.telephone || req.appUser.telephone.trim() === '')) {
+      req.appUser.telephone = clientPhone;
+      await req.appUser.save();
+    }
+
+    // Cherche le client dans ce salon via son numéro de téléphone ou appUser
+    const clientQuery = [{ salon: salon._id, telephone: clientPhone }];
+    if (cleanPhoneDigits.length >= 8) {
+      clientQuery.push({ salon: salon._id, telephone: { $regex: cleanPhoneDigits + '$' } });
+    }
+    if (req.appUser) {
+      clientQuery.push({ salon: salon._id, appUser: req.appUser._id });
+    }
+
+    let client = await Client.findOne({ $or: clientQuery });
 
     const parrainPhone = req.body.parrainPhone;
     let parrain = null;
     if (parrainPhone && parrainPhone !== clientPhone) {
-      parrain = await Client.findOne({ salon: salon._id, telephone: parrainPhone });
+      const parrainDigits = parrainPhone.replace(/\D/g, '').slice(-9);
+      parrain = await Client.findOne({
+        salon: salon._id,
+        $or: [
+          { telephone: parrainPhone },
+          { telephone: { $regex: parrainDigits + '$' } }
+        ]
+      });
     }
 
     if (!client) {
       // Create Client
       client = await Client.create({
-        nom: req.body.nomClient || req.appUser.nom || 'Client App',
+        nom: req.body.nomClient || (req.appUser ? req.appUser.nom : null) || 'Client App',
         telephone: clientPhone,
         salon: salon._id,
+        appUser: req.appUser ? req.appUser._id : null,
         parrainId: parrain ? parrain._id : null
       });
 
@@ -427,14 +449,22 @@ exports.createBooking = async (req, res) => {
         parrain.nombreFilleuls = (parrain.nombreFilleuls || 0) + 1;
         await parrain.save();
       }
-    } else if (parrain && !client.parrainId) {
-      // Client existant mais pas encore parrainé
-      client.parrainId = parrain._id;
-      await client.save();
-
-      parrain.pointsFidelite = (parrain.pointsFidelite || 0) + 3;
-      parrain.nombreFilleuls = (parrain.nombreFilleuls || 0) + 1;
-      await parrain.save();
+    } else {
+      let clientModified = false;
+      if (req.appUser && !client.appUser) {
+        client.appUser = req.appUser._id;
+        clientModified = true;
+      }
+      if (parrain && !client.parrainId) {
+        client.parrainId = parrain._id;
+        parrain.pointsFidelite = (parrain.pointsFidelite || 0) + 3;
+        parrain.nombreFilleuls = (parrain.nombreFilleuls || 0) + 1;
+        await parrain.save();
+        clientModified = true;
+      }
+      if (clientModified) {
+        await client.save();
+      }
     }
 
     // Check appointments limit
@@ -592,19 +622,29 @@ exports.createBooking = async (req, res) => {
       }
 
       // 2. Notifier l'employé (si différent de l'owner)
-      if (assignedEmployeId && assignedEmployeId.toString() !== (salon.owner ? salon.owner.toString() : '')) {
+      if (assignedEmployeId && (!salon.owner || assignedEmployeId.toString() !== salon.owner.toString())) {
         await Notification.create({
           ...notifData,
           user: assignedEmployeId
         });
       }
     } catch (notifErr) {
-      console.error('⚠️ Impossible de créer les notifications de rendez-vous:', notifErr.message);
+      console.error('Erreur création notification booking:', notifErr.message);
     }
 
-    res.status(201).json({ success: true, data: rendezVous });
-  } catch (error) {
-    sendErrorResponse(res, error);
+    const populatedRendezVous = await Rendezvous.findById(rendezVous._id)
+      .populate('salon', 'name nom slug logoUrl address ville branding')
+      .populate('prestations', 'nom prix description duree')
+      .populate('typePrestation', 'nom prix description duree')
+      .populate('employe', 'nom telephone avatarUrl');
+
+    res.status(201).json({
+      success: true,
+      message: 'Rendez-vous créé avec succès',
+      data: populatedRendezVous
+    });
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -760,16 +800,25 @@ exports.getBookingsCount = async (req, res, next) => {
 // GET /api/marketplace/bookings
 exports.getClientBookings = async (req, res, next) => {
   try {
-    if (!req.appUser || !req.appUser.telephone) {
+    if (!req.appUser) {
       return res.status(200).json({ success: true, data: [] });
     }
-    const clients = await Client.find({ telephone: req.appUser.telephone });
+
+    const cleanPhoneDigits = req.appUser.telephone ? req.appUser.telephone.replace(/\D/g, '').slice(-9) : '';
+
+    const queryConditions = [{ appUser: req.appUser._id }];
+    if (cleanPhoneDigits && cleanPhoneDigits.length >= 8) {
+      queryConditions.push({ telephone: { $regex: cleanPhoneDigits + '$' } });
+    }
+
+    const clients = await Client.find({ $or: queryConditions });
     const clientIds = clients.map(c => c._id);
 
     const bookings = await Rendezvous.find({ client: { $in: clientIds } })
       .populate('salon', 'name nom slug logoUrl address ville branding')
       .populate('prestations', 'nom prix description duree')
       .populate('typePrestation', 'nom prix description duree')
+      .populate('employe', 'nom telephone avatarUrl')
       .sort({ createdAt: -1 });
 
     res.status(200).json({ success: true, data: bookings });
@@ -781,10 +830,28 @@ exports.getClientBookings = async (req, res, next) => {
 // GET /api/marketplace/auth/loyalty
 exports.getClientLoyalty = async (req, res, next) => {
   try {
-    if (!req.appUser || !req.appUser.telephone) {
+    if (!req.appUser) {
       return res.status(200).json({ success: true, data: [] });
     }
-    const clients = await Client.find({ telephone: req.appUser.telephone })
+
+    const cleanPhoneDigits = req.appUser.telephone ? req.appUser.telephone.replace(/\D/g, '').slice(-9) : '';
+
+    const queryConditions = [{ appUser: req.appUser._id }];
+    if (cleanPhoneDigits && cleanPhoneDigits.length >= 8) {
+      queryConditions.push({ telephone: { $regex: cleanPhoneDigits + '$' } });
+    }
+
+    const clients = await Client.find({
+      $or: queryConditions,
+      $and: [
+        {
+          $or: [
+            { pointsFidelite: { $gt: 0 } },
+            { nombreVisites: { $gt: 0 } }
+          ]
+        }
+      ]
+    })
       .populate('salon', 'name nom slug logoUrl bannerUrl configFidelite branding')
       .lean();
 
@@ -799,11 +866,18 @@ exports.confirmBookingCompletion = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    if (!req.appUser || !req.appUser.telephone) {
+    if (!req.appUser) {
       return res.status(401).json({ success: false, message: 'Non autorisé' });
     }
 
-    const clients = await Client.find({ telephone: req.appUser.telephone });
+    const cleanPhoneDigits = req.appUser.telephone ? req.appUser.telephone.replace(/\D/g, '').slice(-9) : '';
+
+    const queryConditions = [{ appUser: req.appUser._id }];
+    if (cleanPhoneDigits && cleanPhoneDigits.length >= 8) {
+      queryConditions.push({ telephone: { $regex: cleanPhoneDigits + '$' } });
+    }
+
+    const clients = await Client.find({ $or: queryConditions });
     const clientIds = clients.map(c => c._id.toString());
 
     const booking = await Rendezvous.findById(id)
@@ -815,24 +889,52 @@ exports.confirmBookingCompletion = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Réservation introuvable' });
     }
 
-    // Vérifier que la réservation appartient au client connecté
     const bookingClientId = booking.client?._id ? booking.client._id.toString() : booking.client?.toString();
     const isOwner = clientIds.includes(bookingClientId);
     if (!isOwner) {
       return res.status(403).json({ success: false, message: 'Cette réservation ne vous appartient pas' });
     }
 
+    const previousStatut = booking.statut;
+
     // Marquer la réservation comme terminée / honorée
     booking.statut = 'completed';
     await booking.save();
 
-    // Déclencher le reversement Payout au salon si le paiement a été fait en ligne
-    const paymentService = require('../services/payment.service');
-    await paymentService.executeBookingPayout(booking);
+    // Incrémenter les points de fidélité et le nombre de visites sur le modèle Client
+    if (booking.client && previousStatut !== 'completed') {
+      const clientObj = await Client.findById(booking.client._id || booking.client).populate('salon');
+      if (clientObj) {
+        const configFidelite = clientObj.salon?.configFidelite || { visitesRequises: 10, visitesVIP: 20 };
+        const price = (booking.prestations || []).reduce((sum, p) => sum + (parseInt((p.prix || '').toString().replace(/\D/g, ''), 10) || 0), 0) || 0;
+        if (typeof clientObj.enregistrerVisite === 'function') {
+          clientObj.enregistrerVisite(price, configFidelite);
+        } else {
+          clientObj.pointsFidelite = (clientObj.pointsFidelite || 0) + 1;
+          clientObj.nombreVisites = (clientObj.nombreVisites || 0) + 1;
+          clientObj.totalDepense = (clientObj.totalDepense || 0) + price;
+          clientObj.derniereVisite = new Date();
+        }
+        if (req.appUser && !clientObj.appUser) {
+          clientObj.appUser = req.appUser._id;
+        }
+        await clientObj.save();
+      }
+    }
+
+    // Déclencher le reversement Payout au salon uniquement si le paiement avait été effectué en ligne
+    if (previousStatut === 'paid') {
+      const paymentService = require('../services/payment.service');
+      try {
+        await paymentService.executeBookingPayout(booking);
+      } catch (payoutErr) {
+        console.error('[MARKETPLACE CONTROLLER] Erreur lors du payout:', payoutErr.message);
+      }
+    }
 
     res.status(200).json({
       success: true,
-      message: 'Prestation confirmée avec succès. Le paiement a été débloqué au salon.',
+      message: 'Prestation confirmée avec succès.',
       data: booking
     });
   } catch (err) {

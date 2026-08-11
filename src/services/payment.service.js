@@ -52,7 +52,15 @@ class PaymentService {
             if (booking && booking.statut !== 'paid') {
               booking.statut = 'paid';
               await booking.save();
-              console.log(`[PAYMENT SERVICE] Réservation ${transaction.reference} marquée comme payée en ligne. Le reversement (Payout) sera effectué lors de la confirmation de la prestation.`);
+              console.log(`[PAYMENT SERVICE] Réservation ${transaction.reference} marquée comme payée en ligne.`);
+              
+              // Déclencher le reversement (Payout) immédiatement après le dépôt réussi
+              try {
+                await this.executeBookingPayout(booking);
+                console.log(`[PAYMENT SERVICE] Payout initié automatiquement pour la réservation ${transaction.reference}.`);
+              } catch (payoutError) {
+                console.error(`[PAYMENT SERVICE] Erreur lors de l'initiation automatique du Payout pour ${transaction.reference}:`, payoutError);
+              }
             }
           } else {
             // Activer la logique d'abonnement via le service dédié
