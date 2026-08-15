@@ -2,6 +2,7 @@ const Transaction = require('../models/Transaction');
 const Rendezvous = require('../models/Rendezvous');
 const PayoutTransaction = require('../models/PayoutTransaction');
 const subscriptionService = require('./subscription.service');
+const { sendPaymentNotificationEmail } = require('./email.service');
 
 class PaymentService {
   /**
@@ -45,6 +46,15 @@ class PaymentService {
         if (isSuccessful) {
           transaction.statut = 'SUCCESSFUL';
           await transaction.save();
+
+          // Envoyer l'email de notification de paiement au client et alerte à l'admin
+          sendPaymentNotificationEmail({
+            to: null, // S'il n'y a pas d'email direct dans transaction, l'alerte admin part automatiquement
+            name: 'Client BeautyFlow',
+            amount: transaction.montant,
+            reference: transaction.reference,
+            type: transaction.type === 'reservation' ? 'Réservation en ligne' : `Abonnement (${transaction.plan})`
+          }).catch(e => console.warn('Erreur notification email paiement:', e.message));
 
           if (transaction.type === 'reservation') {
             // Logique de réservation

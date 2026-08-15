@@ -73,6 +73,13 @@ const affiliateSchema = new mongoose.Schema({
       default: '',
     },
   },
+  isEmailVerified: {
+    type: Boolean,
+    default: false,
+  },
+  emailVerificationCode: {
+    type: String,
+  },
   actif: {
     type: Boolean,
     default: true,

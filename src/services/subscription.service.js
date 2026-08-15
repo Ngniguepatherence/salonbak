@@ -1,5 +1,6 @@
 const Salon = require('../models/Salon');
 const { getPlan } = require('../config/plans');
+const { sendSubscriptionNotificationEmail } = require('./email.service');
 
 class SubscriptionService {
   /**
@@ -114,6 +115,15 @@ class SubscriptionService {
 
       await salon.save();
       console.log(`[SUBSCRIPTION SERVICE] Abonnement ${planName} activé pour le salon ${salon.name} (Ref: ${transactionReference}). Type d'opération : ${isDowngrade ? 'Downgrade' : isUpgrade ? 'Upgrade' : 'Renouvellement/Achat'}. Date fin globale : ${salon.abonnement.dateFin}`);
+
+      // Déclencher l'envoi d'email de confirmation au salon & alerte admin
+      sendSubscriptionNotificationEmail({
+        to: salon.email,
+        salonName: salon.name,
+        plan: planName,
+        amount: selectedPlan.price,
+        reference: transactionReference
+      }).catch(e => console.warn('Erreur notification email abonnement:', e.message));
 
       // 2. Check if this is the first payment of the salon and handles affiliate payment
       if (salon.affiliateCode && !salon.affiliatePaid) {

@@ -13,7 +13,9 @@ const {
   updatePayoutConfig,
   getAffiliateStats,
   createAffiliateCode,
-  updateAffiliateProfile
+  updateAffiliateProfile,
+  verifyAffiliateEmail,
+  resendAffiliateEmailCode
 } = require('../controllers/AuthController');
 
 const { protect } = require('../middleware/auth');
@@ -34,6 +36,8 @@ router.post('/google', loginLimiter, googleTokenLogin);
 
 // Routes Affiliation
 router.post('/affiliate/register', loginLimiter, affiliateRegister);
+router.post('/affiliate/verify-email', protect, verifyAffiliateEmail);
+router.post('/affiliate/resend-email', protect, resendAffiliateEmailCode);
 router.put('/affiliate/payout-config', protect, updatePayoutConfig);
 router.get('/affiliate/stats', protect, getAffiliateStats);
 router.post('/affiliate/create-code', protect, createAffiliateCode);

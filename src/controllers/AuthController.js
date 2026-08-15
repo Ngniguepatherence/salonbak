@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Affiliate = require('../models/Affiliate');
 const Salon = require('../models/Salon');
+const { sendAffiliateVerificationEmail } = require('../services/email.service');
 const { OAuth2Client } = require('google-auth-library');
 const { isSafeRedirect } = require('../utils/security');
 const client = new OAuth2Client(
@@ -451,6 +452,7 @@ exports.googleTokenLogin = async (req, res, next) => {
           avatarUrl: picture,
           role: 'affiliate',
           affiliateCode,
+          isEmailVerified: true,
           actif: true,
         });
       } else {
@@ -467,6 +469,10 @@ exports.googleTokenLogin = async (req, res, next) => {
       let updated = false;
       if (!user.googleId) {
         user.googleId = googleId;
+        updated = true;
+      }
+      if (user.role === 'affiliate' && !user.isEmailVerified) {
+        user.isEmailVerified = true;
         updated = true;
       }
       if (!user.avatarUrl && picture) {
@@ -518,6 +524,9 @@ exports.affiliateRegister = async (req, res, next) => {
       if (!existing) codeExists = false;
     }
 
+    // Generate 6-digit email verification code
+    const emailVerificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
     const user = await Affiliate.create({
       name,
       email,
@@ -527,17 +536,96 @@ exports.affiliateRegister = async (req, res, next) => {
       pays: pays || 'CM',
       role: 'affiliate',
       affiliateCode,
+      isEmailVerified: false,
+      emailVerificationCode,
       actif: true
     });
 
     const token = user.getSignedJwtToken();
 
+    // Trigger real transactional email sending via Nodemailer / SMTP
+    sendAffiliateVerificationEmail({
+      to: user.email,
+      name: user.name,
+      code: emailVerificationCode
+    }).catch(err => {
+      console.error('⚠️ [EMAIL SERVICE] Erreur lors de l\'envoi de l\'email de vérification:', err.message);
+    });
+
     res.status(201).json({
       success: true,
-      ...buildSessionResponse(user, null, token)
+      ...buildSessionResponse(user, null, token),
+      emailVerificationCode
     });
   } catch (err) {
     console.error('Erreur lors de l\'inscription de l\'affilié:', err);
+    next(err);
+  }
+};
+
+// @desc    Verify affiliate email code
+// @route   POST /api/auth/affiliate/verify-email
+// @access  Private
+exports.verifyAffiliateEmail = async (req, res, next) => {
+  try {
+    const { code } = req.body;
+    const user = await Affiliate.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Affilié introuvable' });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(200).json({ success: true, message: 'Email déjà vérifié avec succès' });
+    }
+
+    if (code && code.trim() === user.emailVerificationCode) {
+      user.isEmailVerified = true;
+      await user.save();
+      return res.status(200).json({ success: true, message: 'Email vérifié avec succès !' });
+    }
+
+    return res.status(400).json({ success: false, message: 'Code de vérification invalide. Veuillez vérifier le code envoyé par email.' });
+  } catch (err) {
+    console.error('Erreur lors de la vérification de l\'email:', err);
+    next(err);
+  }
+};
+
+// @desc    Resend email verification code
+// @route   POST /api/auth/affiliate/resend-email
+// @access  Private
+exports.resendAffiliateEmailCode = async (req, res, next) => {
+  try {
+    const user = await Affiliate.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Affilié introuvable' });
+    }
+    if (user.isEmailVerified) {
+      return res.status(400).json({ success: false, message: 'Votre email est déjà vérifié' });
+    }
+
+    // Générer un NOUVEAU code à 6 chiffres à chaque renvoi
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    user.emailVerificationCode = newCode;
+    await user.save();
+
+    // Déclencher l'envoi d'email avec capture d'erreur pour ne pas bloquer si le serveur SMTP est en cours de configuration
+    sendAffiliateVerificationEmail({
+      to: user.email,
+      name: user.name,
+      code: newCode
+    }).catch(err => {
+      console.error('⚠️ [EMAIL SERVICE] Erreur lors du renvoi du mail de vérification:', err.message);
+      console.log(`💡 [FALLBACK OTP CODE] Code de vérification pour ${user.email} : ${newCode}`);
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Un nouveau code de vérification à 6 chiffres a été envoyé à ${user.email}.`,
+      emailVerificationCode: newCode
+    });
+  } catch (err) {
+    console.error('Erreur lors du renvoi du code d\'email:', err);
     next(err);
   }
 };
@@ -618,6 +706,7 @@ exports.getAffiliateStats = async (req, res, next) => {
         partner: {
           name: req.user.name,
           email: req.user.email,
+          isEmailVerified: Boolean(req.user.isEmailVerified),
           telephone: req.user.telephone || '',
           ville: req.user.ville || '',
           pays: req.user.pays || 'CM'

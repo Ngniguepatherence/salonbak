@@ -21,7 +21,7 @@ const {
   confirmBookingCompletion
 } = require('../controllers/MarketplaceController');
 
-const { protectAppUser } = require('../middleware/auth');
+const { protectAppUser, optionalAppUser } = require('../middleware/auth');
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -50,8 +50,8 @@ router.get('/salons/:slug/share-preview', getSalonSharePreview);
 router.get('/salons/:slug/appointments', getSalonAppointments);
 router.get('/bookings/count', getBookingsCount);
 
-// Protected action route
-router.post('/bookings', protectAppUser, createBooking);
+// Action routes (Guest booking allowed with optionalAppUser)
+router.post('/bookings', optionalAppUser, createBooking);
 router.get('/bookings', protectAppUser, getClientBookings);
 router.post('/bookings/:id/confirm-completion', protectAppUser, confirmBookingCompletion);
 

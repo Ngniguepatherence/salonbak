@@ -76,6 +76,33 @@ exports.protectAppUser = async (req, res, next) => {
 };
 
 /**
+ * Attache l'AppUser à req.appUser s'il est fourni (token JWT optionnel)
+ */
+exports.optionalAppUser = async (req, res, next) => {
+  let token;
+  if (req.headers.authorization?.startsWith('Bearer ')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+  if (!token) {
+    return next();
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const AppUser = require('../models/AppUser');
+    const user = await AppUser.findById(decoded.id);
+
+    if (user && user.actif) {
+      req.appUser = user;
+    }
+  } catch (err) {
+    // Ignore token errors for guest requests
+  }
+  next();
+};
+
+
+/**
  * Restreint l'accès à certains rôles
  * Usage : authorize('admin', 'owner')
  */
