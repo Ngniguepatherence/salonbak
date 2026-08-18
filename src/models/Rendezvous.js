@@ -9,7 +9,19 @@ const rendezVousSchema = new mongoose.Schema({
   client: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Client',
-    required: [true, 'Veuillez fournir un client'],
+    required: false,
+  },
+  customerName: {
+    type: String,
+    trim: true,
+  },
+  customerPhone: {
+    type: String,
+    trim: true,
+  },
+  customerEmail: {
+    type: String,
+    trim: true,
   },
   typePrestation: {
     type: mongoose.Schema.Types.ObjectId,

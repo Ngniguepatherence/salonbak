@@ -435,19 +435,32 @@ exports.createBooking = async (req, res) => {
     }
 
     if (!client) {
-      // Create Client
-      client = await Client.create({
-        nom: req.body.nomClient || (req.appUser ? req.appUser.nom : null) || 'Client App',
-        telephone: clientPhone,
-        salon: salon._id,
-        appUser: req.appUser ? req.appUser._id : null,
-        parrainId: parrain ? parrain._id : null
-      });
+      // Check customer limit (maxCustomers) for salon
+      const { limits } = salon;
+      const currentLimit = limits?.maxCustomers ?? -1;
+      let canCreateClient = true;
+      if (currentLimit !== -1) {
+        const currentCount = await Client.countDocuments({ salon: salon._id });
+        if (currentCount >= currentLimit) {
+          canCreateClient = false;
+        }
+      }
 
-      if (parrain) {
-        parrain.pointsFidelite = (parrain.pointsFidelite || 0) + 3;
-        parrain.nombreFilleuls = (parrain.nombreFilleuls || 0) + 1;
-        await parrain.save();
+      if (canCreateClient) {
+        // Create Client only if limit is not reached
+        client = await Client.create({
+          nom: req.body.nomClient || (req.appUser ? req.appUser.nom : null) || 'Client App',
+          telephone: clientPhone,
+          salon: salon._id,
+          appUser: req.appUser ? req.appUser._id : null,
+          parrainId: parrain ? parrain._id : null
+        });
+
+        if (parrain) {
+          parrain.pointsFidelite = (parrain.pointsFidelite || 0) + 3;
+          parrain.nombreFilleuls = (parrain.nombreFilleuls || 0) + 1;
+          await parrain.save();
+        }
       }
     } else {
       let clientModified = false;
@@ -576,9 +589,13 @@ exports.createBooking = async (req, res) => {
     const commissionAmount = isOnsite ? Math.floor(basePrice * commissionRate) : 0;
 
     // Create Rendezvous
+    const clientName = req.body.nomClient || (req.appUser ? req.appUser.nom : null) || 'Client App';
     const rendezVous = await Rendezvous.create({
       salon: salon._id,
-      client: client._id,
+      client: client ? client._id : undefined,
+      customerName: clientName,
+      customerPhone: clientPhone,
+      customerEmail: req.body.emailClient || (req.appUser ? req.appUser.email : null) || '',
       typePrestation: normalizedIds[0],
       prestations: normalizedIds,
       employe: assignedEmployeId,
@@ -586,6 +603,7 @@ exports.createBooking = async (req, res) => {
       heure,
       duree: totalDuration,
       statut: isOnsite ? 'confirme' : 'en_attente',
+      source: 'en_ligne',
       paymentMode: isOnsite ? 'onsite' : 'online',
       commissionAmount,
       commissionPaid: false,
