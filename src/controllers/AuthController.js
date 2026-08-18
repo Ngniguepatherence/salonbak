@@ -14,26 +14,29 @@ const client = new OAuth2Client(
  * Construit la réponse de session à renvoyer au frontend
  */
 const buildSessionResponse = (user, salon, token) => {
-  const permissions = {
-    owner: [
-      'clients:read', 'clients:write', 'clients:delete',
-      'prestations:read', 'prestations:write', 'prestations:delete',
-      'produits:read', 'produits:write', 'produits:delete',
-      'ventes:read', 'ventes:write', 'ventes:delete',
-      'depenses:read', 'depenses:write', 'depenses:delete',
-      'staff:read', 'staff:write', 'staff:delete',
-      'salon:read', 'salon:write',
-    ],
-    staff: [
-      'clients:read', 'clients:write',
-      'prestations:read',
-      'produits:read',
-      'ventes:read', 'ventes:write',
-    ],
-    affiliate: [
-      'affiliate:read',
-    ],
-  };
+const ownerPermissions = [
+  'clients:read', 'clients:write', 'clients:delete',
+  'prestations:read', 'prestations:write', 'prestations:delete',
+  'produits:read', 'produits:write', 'produits:delete',
+  'ventes:read', 'ventes:write', 'ventes:delete',
+  'depenses:read', 'depenses:write', 'depenses:delete',
+  'staff:read', 'staff:write', 'staff:delete',
+  'salon:read', 'salon:write',
+];
+
+const permissions = {
+  owner: ownerPermissions,
+  co_owner: ownerPermissions,
+  staff: [
+    'clients:read', 'clients:write',
+    'prestations:read',
+    'produits:read',
+    'ventes:read', 'ventes:write',
+  ],
+  affiliate: [
+    'affiliate:read',
+  ],
+};
 
   return {
     token,

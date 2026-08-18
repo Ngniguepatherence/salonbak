@@ -33,7 +33,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['owner', 'staff', 'admin', 'affiliate'],
+    enum: ['owner', 'co_owner', 'staff', 'admin', 'affiliate'],
     default: 'staff',
   },
   affiliateCode: {

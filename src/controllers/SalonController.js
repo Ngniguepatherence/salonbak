@@ -299,7 +299,7 @@ exports.getAbonnement = async (req, res, next) => {
 exports.getStaff = async (req, res, next) => {
   try {
     const staff = await User
-      .find({ salon: req.params.salonId, role: 'staff' })
+      .find({ salon: req.params.salonId, role: { $in: ['staff', 'co_owner'] } })
       .select('-password');
 
     res.status(200).json({ success: true, count: staff.length, data: staff });
@@ -310,18 +310,20 @@ exports.getStaff = async (req, res, next) => {
 
 exports.createStaff = async (req, res, next) => {
   try {
-    const { name, email, password, telephone } = req.body;
+    const { name, email, password, telephone, role } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, message: 'name, email et password requis' });
     }
+
+    const assignedRole = role === 'co_owner' ? 'co_owner' : 'staff';
 
     const staff = await User.create({
       name,
       email,
       password,
       telephone,
-      role: 'staff',
+      role: assignedRole,
       salon: req.params.salonId,
     });
 
@@ -336,8 +338,7 @@ exports.createStaff = async (req, res, next) => {
 
 exports.updateStaff = async (req, res, next) => {
   try {
-    // Si l'utilisateur connecté n'est pas un admin, il ne peut modifier que les membres avec le rôle 'staff'
-    const allowedRoles = req.user.role === 'admin' ? ['staff', 'owner'] : ['staff'];
+    const allowedRoles = req.user.role === 'admin' ? ['staff', 'co_owner', 'owner'] : ['staff', 'co_owner'];
     const staff = await User.findOne({
       _id: req.params.userId,
       salon: req.params.salonId,
@@ -354,6 +355,9 @@ exports.updateStaff = async (req, res, next) => {
     if (req.body.telephone !== undefined) staff.telephone = req.body.telephone;
     if (req.body.avatarUrl !== undefined) staff.avatarUrl = req.body.avatarUrl;
     if (req.body.availability !== undefined) staff.availability = req.body.availability;
+    if (req.body.role !== undefined && staff.role !== 'owner') {
+      staff.role = req.body.role === 'co_owner' ? 'co_owner' : 'staff';
+    }
     if (req.body.password !== undefined && req.body.password !== '') {
       staff.password = req.body.password; // Ce sera hashé par le hook pre('save') !
     }
@@ -371,7 +375,7 @@ exports.deleteStaff = async (req, res, next) => {
     const staff = await User.findOneAndDelete({
       _id: req.params.userId,
       salon: req.params.salonId,
-      role: 'staff',
+      role: { $in: ['staff', 'co_owner'] },
     });
 
     if (!staff) {
