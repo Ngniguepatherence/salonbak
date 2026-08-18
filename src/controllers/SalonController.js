@@ -48,8 +48,8 @@ function sanitizeBody(body, role) {
 exports.onboardSalon = async (req, res, next) => {
   try {
     const user = await User.findById(req.user._id);
-    if (!user || user.role !== 'owner') {
-      return res.status(403).json({ success: false, message: 'Seul un propriétaire peut créer un salon' });
+    if (!user || (user.role !== 'owner' && user.role !== 'co_owner')) {
+      return res.status(403).json({ success: false, message: 'Seul un propriétaire ou co-propriétaire peut créer un salon' });
     }
     if (user.salon) {
       return res.status(400).json({ success: false, message: 'Vous avez déjà un salon associé' });
@@ -137,8 +137,8 @@ exports.onboardSalon = async (req, res, next) => {
 exports.linkSalon = async (req, res, next) => {
   try {
     const user = await User.findById(req.user._id);
-    if (!user || user.role !== 'owner') {
-      return res.status(403).json({ success: false, message: 'Seul un propriétaire peut lier un salon' });
+    if (!user || (user.role !== 'owner' && user.role !== 'co_owner')) {
+      return res.status(403).json({ success: false, message: 'Seul un propriétaire ou co-propriétaire peut lier un salon' });
     }
     if (user.salon) {
       return res.status(400).json({ success: false, message: 'Vous avez déjà un salon associé' });

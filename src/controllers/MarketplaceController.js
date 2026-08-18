@@ -352,12 +352,12 @@ exports.getSalonBySlug = async (req, res) => {
     // Fetch prestations for this salon
     const prestations = await TypePrestation.find({ salon: salon._id, actif: true });
 
-    // Fetch team (staff/owner) for this salon
-    const team = await User.find({ salon: salon._id, actif: true, role: { $in: ['staff', 'owner'] } });
+    // Fetch team (staff/owner/co_owner) for this salon
+    const team = await User.find({ salon: salon._id, actif: true, role: { $in: ['staff', 'owner', 'co_owner'] } });
     const staff = team.map(member => ({
       id: member._id,
       nom: member.name,
-      role: member.role === 'owner' ? 'Propriétaire' : 'Staff',
+      role: member.role === 'owner' ? 'Propriétaire' : member.role === 'co_owner' ? 'Co-propriétaire' : 'Staff',
       photoUrl: member.avatarUrl || null,
       specialties: [],
       availability: member.availability || null
@@ -492,8 +492,8 @@ exports.createBooking = async (req, res) => {
     const bookingStartMin = timeToMinutes(heure);
     const bookingEndMin = bookingStartMin + slotDuration;
 
-    // Récupérer les collaborateurs actifs du salon (staff + owner)
-    const team = await User.find({ salon: salon._id, actif: true, role: { $in: ['staff', 'owner'] } });
+    // Récupérer les collaborateurs actifs du salon (staff + owner + co_owner)
+    const team = await User.find({ salon: salon._id, actif: true, role: { $in: ['staff', 'owner', 'co_owner'] } });
 
     // Récupérer les rendez-vous existants de la journée pour vérifier les chevauchements
     const dayBookings = await Rendezvous.find({

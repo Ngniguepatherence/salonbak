@@ -109,7 +109,11 @@ exports.optionalAppUser = async (req, res, next) => {
 exports.authorize = (...roles) => {
   return (req, res, next) => {
     if (req.user.role === 'admin') return next();
-    if (!roles.includes(req.user.role)) {
+    const effectiveRoles = (roles.includes('owner') && !roles.includes('co_owner'))
+      ? [...roles, 'co_owner']
+      : roles;
+
+    if (!effectiveRoles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
         message: `Le rôle '${req.user.role}' n'est pas autorisé à accéder à cette ressource`,
