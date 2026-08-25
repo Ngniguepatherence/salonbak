@@ -81,6 +81,10 @@ const salonSchema = new mongoose.Schema({
     unique: true,
     sparse: true,
   },
+  oldSlugs: [{
+    type: String,
+    index: true,
+  }],
   slogan: {
     type: String,
     trim: true,
@@ -351,12 +355,43 @@ salonSchema.methods.checkSubscriptionTransition = async function () {
   return false;
 };
 
-salonSchema.pre('save', function () {
-  if (this.isModified('name') && !this.slug) {
-    this.slug = this.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)+/g, '') + '-' + Math.random().toString(36).substring(2, 6);
+function createSlugString(text) {
+  if (!text) return '';
+  return text
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+salonSchema.pre('save', async function () {
+  if (!this.slug || this.isModified('name') || this.isModified('ville')) {
+    const baseStr = [this.name, this.ville || ''].filter(Boolean).join(' ');
+    let candidateSlug = createSlugString(baseStr);
+    if (!candidateSlug) {
+      candidateSlug = 'salon-' + Math.random().toString(36).substring(2, 7);
+    }
+
+    if (this.slug && this.slug !== candidateSlug) {
+      if (!this.oldSlugs) this.oldSlugs = [];
+      if (!this.oldSlugs.includes(this.slug)) {
+        this.oldSlugs.push(this.slug);
+      }
+    }
+
+    const SalonModel = this.constructor;
+    let uniqueSlug = candidateSlug;
+    let counter = 2;
+    while (await SalonModel.exists({ _id: { $ne: this._id }, slug: uniqueSlug })) {
+      uniqueSlug = `${candidateSlug}-${counter}`;
+      counter++;
+    }
+    this.slug = uniqueSlug;
   }
 });
 

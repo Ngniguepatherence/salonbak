@@ -18,7 +18,11 @@ const {
   getBookingsCount,
   getClientBookings,
   getClientLoyalty,
-  confirmBookingCompletion
+  confirmBookingCompletion,
+  generateSitemapXml,
+  getRobotsTxt,
+  trackSalonEvent,
+  getSalonAnalytics
 } = require('../controllers/MarketplaceController');
 
 const { protectAppUser, optionalAppUser } = require('../middleware/auth');
@@ -30,6 +34,10 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Sitemap & Robots
+router.get('/sitemap.xml', generateSitemapXml);
+router.get('/robots.txt', getRobotsTxt);
 
 // Auth routes for marketplace
 router.post('/auth/register', loginLimiter, register);
@@ -48,6 +56,8 @@ router.get('/salons', getSalons);
 router.get('/salons/:slug', getSalonBySlug);
 router.get('/salons/:slug/share-preview', getSalonSharePreview);
 router.get('/salons/:slug/appointments', getSalonAppointments);
+router.post('/salons/:slug/track', optionalAppUser, trackSalonEvent);
+router.get('/salons/:id/analytics', getSalonAnalytics);
 router.get('/bookings/count', getBookingsCount);
 
 // Action routes (Guest booking allowed with optionalAppUser)

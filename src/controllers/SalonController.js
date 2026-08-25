@@ -47,12 +47,9 @@ function sanitizeBody(body, role) {
 // ─────────────────────────────────────────────
 exports.onboardSalon = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id);
+    let user = await User.findById(req.user._id);
     if (!user || (user.role !== 'owner' && user.role !== 'co_owner')) {
       return res.status(403).json({ success: false, message: 'Seul un propriétaire ou co-propriétaire peut créer un salon' });
-    }
-    if (user.salon) {
-      return res.status(400).json({ success: false, message: 'Vous avez déjà un salon associé' });
     }
 
     const {
@@ -60,8 +57,39 @@ exports.onboardSalon = async (req, res, next) => {
       slogan, devise, pays, horaires, location, paymentConfig, affiliateCode
     } = req.body;
 
-    if (!name || !phone || !email || !address) {
-      return res.status(400).json({ success: false, message: 'name, phone, email et address sont requis' });
+    const salonName = name ? name.trim() : '';
+    const salonPhone = phone ? phone.trim() : (user.telephone || '');
+    const salonEmail = (email || user.email || '').toLowerCase().trim();
+    const salonAddress = address ? address.trim() : (ville ? ville.trim() : 'À domicile / En ligne');
+
+    if (!salonName || !salonPhone || !salonEmail) {
+      return res.status(400).json({ success: false, message: 'Le nom du salon, le numéro de téléphone et l\'email sont requis' });
+    }
+
+    if (user.salon) {
+      let existingSalon = await Salon.findById(user.salon);
+      if (existingSalon) {
+        if (salonName) existingSalon.name = salonName;
+        if (salonPhone) existingSalon.phone = salonPhone;
+        if (salonEmail) existingSalon.email = salonEmail;
+        if (salonAddress) existingSalon.address = salonAddress;
+        if (ville) existingSalon.ville = ville;
+        if (typeEtablissement) existingSalon.typeEtablissement = typeEtablissement;
+        if (description) existingSalon.description = description;
+        if (horaires) existingSalon.horaires = horaires;
+        if (location) existingSalon.location = location;
+        if (slogan) existingSalon.slogan = slogan;
+        if (devise) existingSalon.devise = devise;
+        if (pays) existingSalon.pays = pays;
+        await existingSalon.save();
+
+        const { buildSessionResponse } = require('./AuthController');
+        const token = user.getSignedJwtToken();
+        return res.status(200).json({
+          success: true,
+          ...buildSessionResponse(user, existingSalon, token)
+        });
+      }
     }
 
     if (affiliateCode) {
@@ -77,11 +105,11 @@ exports.onboardSalon = async (req, res, next) => {
     const trialDays = selectedPlan.trialDurationDays || 14;
 
     const salon = await Salon.create({
-      name,
-      phone,
-      email,
-      address,
-      ville,
+      name: salonName,
+      phone: salonPhone,
+      email: salonEmail,
+      address: salonAddress,
+      ville: ville || '',
       typeEtablissement: typeEtablissement || 'salon_coiffure',
       description,
       logoUrl,

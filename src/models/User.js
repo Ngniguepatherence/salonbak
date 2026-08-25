@@ -28,7 +28,7 @@ const userSchema = new mongoose.Schema({
       function() { return !this.googleId; },
       'Veuillez fournir un mot de passe'
     ],
-    minlength: [8, 'Le mot de passe doit contenir au moins 8 caractères'],
+    minlength: [6, 'Le mot de passe doit contenir au moins 6 caractères'],
     select: false, // Never returned in queries by default
   },
   role: {

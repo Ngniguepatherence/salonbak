@@ -245,19 +245,33 @@ exports.createBookingDeposit = async (req, res, next) => {
       durationDays: 0
     });
 
-    let provider = 'ORANGE_CMR';
-    if (operator === 'orange') {
-      provider = 'ORANGE_CMR';
-    } else if (operator === 'mtn') {
-      provider = 'MTN_MOMO_CMR';
-    } else {
-      const cleanPhone = phone.replace(/\D/g, '');
-      const localPhone = cleanPhone.startsWith('237') ? cleanPhone.slice(3) : cleanPhone;
-      if (localPhone.startsWith('69') || localPhone.startsWith('655') || localPhone.startsWith('656') || localPhone.startsWith('657') || localPhone.startsWith('658') || localPhone.startsWith('659')) {
-        provider = 'ORANGE_CMR';
+    let provider = req.body.provider || req.body.operator;
+    if (!provider || provider === 'orange' || provider === 'mtn' || provider === 'momo') {
+      const cleanPhone = phone ? phone.replace(/\D/g, '') : '';
+      if (cleanPhone.startsWith('225') || (cleanPhone.length === 10 && !cleanPhone.startsWith('6'))) {
+        const local = cleanPhone.startsWith('225') ? cleanPhone.slice(3) : cleanPhone;
+        if (/^(07|08|09|77|78|79)/.test(local)) provider = 'ORANGE_CIV';
+        else if (/^(05|06|54|55|56)/.test(local)) provider = 'MTN_MOMO_CIV';
+        else if (/^(01|02|03)/.test(local)) provider = 'MOOV_CIV';
+        else provider = 'WAVE_CIV';
+      } else if (cleanPhone.startsWith('241')) {
+        provider = 'AIRTEL_GAB';
+      } else if (cleanPhone.startsWith('242')) {
+        provider = 'MTN_MOMO_COG';
+      } else if (cleanPhone.startsWith('235')) {
+        provider = 'AIRTEL_TCD';
+      } else if (cleanPhone.startsWith('221')) {
+        provider = 'WAVE_SEN';
+      } else {
+        const localPhone = cleanPhone.startsWith('237') ? cleanPhone.slice(3) : cleanPhone;
+        if (localPhone.startsWith('69') || /^65[5-9]/.test(localPhone) || provider === 'orange') {
+          provider = 'ORANGE_CMR';
+        } else {
+          provider = 'MTN_MOMO_CMR';
+        }
       }
     }
-    // console.log("provider", provider);
+
     const pawaPayResult = await pawapayService.initiateDeposit({
       depositId,
       amount: calculatedAmount,

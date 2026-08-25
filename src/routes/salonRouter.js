@@ -63,6 +63,8 @@ const typeCtrl = createTenantController(TypePrestation);
 const produitCtrl = createTenantController(Produit);
 const depenseCtrl = createTenantController(Depense, [{ path: 'creePar', select: 'name' }]);
 
+const { getSalonAnalytics } = require('../controllers/MarketplaceController');
+
 // ==================== ONBOARDING ====================
 router.post('/onboard', protect, onboardSalon);
 router.post('/link', protect, linkSalon);
@@ -71,6 +73,10 @@ router.post('/link', protect, linkSalon);
 // Middlewares communs à toutes les routes salon
 // ──────────────────────────────────────────────
 router.use(protect, belongsToSalon, requireActiveSubscription);
+
+// ==================== ANALYTICS ====================
+router.get('/analytics', getSalonAnalytics);
+router.get('/:id/analytics', getSalonAnalytics);
 
 // ==================== SALON ====================
 router.route('/')

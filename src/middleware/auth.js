@@ -128,17 +128,23 @@ exports.authorize = (...roles) => {
  * (ou qu'il est admin global)
  */
 exports.belongsToSalon = (req, res, next) => {
-  const salonId = req.params.salonId;
+  const userSalonId = req.user?.salon?._id?.toString() || req.user?.salon?.toString();
+  const salonId = req.params.salonId || req.params.id || req.query.salonId || userSalonId;
 
   console.log(`[belongsToSalon] URL: ${req.originalUrl} | Method: ${req.method} | Params salonId: ${salonId}`);
-  console.log(`[belongsToSalon] User role: ${req.user?.role} | User salonId: ${req.user?.salon?._id?.toString() || req.user?.salon?.toString()}`);
+  console.log(`[belongsToSalon] User role: ${req.user?.role} | User salonId: ${userSalonId}`);
 
-  if (req.user.role === 'admin') return next();
+  if (req.user?.role === 'admin') return next();
 
-  const userSalonId = req.user.salon?._id?.toString() || req.user.salon?.toString();
+  if (!userSalonId) {
+    return res.status(403).json({
+      success: false,
+      message: 'Accès refusé — aucun salon associé à votre compte',
+    });
+  }
 
-  if (!userSalonId || userSalonId !== salonId) {
-    console.log(`[belongsToSalon] Access DENIED for salonId: ${salonId} vs userSalonId: ${userSalonId}`);
+  if (req.params.salonId && userSalonId !== req.params.salonId) {
+    console.log(`[belongsToSalon] Access DENIED for salonId: ${req.params.salonId} vs userSalonId: ${userSalonId}`);
     return res.status(403).json({
       success: false,
       message: 'Accès refusé — vous n\'appartenez pas à ce salon',

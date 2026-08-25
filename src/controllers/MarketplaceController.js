@@ -5,6 +5,7 @@ const Rendezvous = require('../models/Rendezvous');
 const TypePrestation = require('../models/TypePrestation');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
+const SalonAnalyticsEvent = require('../models/SalonAnalyticsEvent');
 
 const { OAuth2Client } = require('google-auth-library');
 let redirectUriMarketplace = process.env.GOOGLE_REDIRECT_URI_MARKETPLACE || '';
@@ -309,12 +310,25 @@ exports.toggleFavorite = async (req, res) => {
 // 4. Salons: List
 exports.getSalons = async (req, res) => {
   try {
-    // Return only active and non-hidden salons
-    const salons = await Salon.find({ isActive: true, isHidden: { $ne: true }, hidden: { $ne: true } })
-      .select('name slug address ville pays typeEtablissement logoUrl bannerUrl galleryUrls description phone email availability horaires location isHidden hidden');
+    const { country, pays } = req.query;
+    const query = { isActive: { $ne: false }, isHidden: { $ne: true }, hidden: { $ne: true } };
 
-    // We can map these so the frontend receives them in the expected format
-    res.status(200).json({ success: true, data: salons });
+    const countryFilter = country || pays;
+    if (countryFilter && countryFilter !== 'all') {
+      query.pays = { $regex: new RegExp(`^${countryFilter}$`, 'i') };
+    }
+
+    // Return active and non-hidden salons matching query
+    const salons = await Salon.find(query)
+      .select('name slug address ville pays devise typeEtablissement logoUrl bannerUrl galleryUrls description phone email availability horaires location isHidden hidden branding businessType freelanceSettings bookingSettings rating reviewCount isSponsored');
+
+    const data = salons.map(s => {
+      const obj = s.toObject();
+      if (!obj.slug) obj.slug = String(obj._id);
+      return obj;
+    });
+
+    res.status(200).json({ success: true, data });
   } catch (error) {
     sendErrorResponse(res, error);
   }
@@ -324,25 +338,54 @@ exports.getSalons = async (req, res) => {
 exports.getSalonBySlug = async (req, res) => {
   try {
     const slug = req.params.slug;
-    const isObjectId = slug.match(/^[0-9a-fA-F]{24}$/);
+    const isObjectId = slug && slug.match(/^[0-9a-fA-F]{24}$/);
 
-    const query = isObjectId ? { _id: slug } : { slug: slug };
-    query.isActive = true;
+    const orConditions = [
+      { slug: slug },
+      { oldSlugs: slug }
+    ];
+    if (isObjectId) {
+      orConditions.unshift({ _id: slug });
+    } else if (slug) {
+      const cleanName = slug.replace(/-/g, ' ');
+      orConditions.push({ name: { $regex: new RegExp(`^${cleanName}$`, 'i') } });
+    }
 
-    const salon = await Salon.findOne(query);
+    const query = {
+      $or: orConditions,
+      isActive: { $ne: false }
+    };
+
+    let salon = await Salon.findOne(query);
+
+    // Fallback: search without isActive restriction or by direct ID
+    if (!salon && isObjectId) {
+      salon = await Salon.findById(slug);
+    }
+    if (!salon) {
+      salon = await Salon.findOne({ $or: orConditions });
+    }
+
     if (!salon) {
       return res.status(404).json({ success: false, message: 'Salon introuvable' });
     }
+
+    const effectiveSlug = salon.slug || String(salon._id);
+    const isCanonical = effectiveSlug === slug;
+    const redirectUrl = isCanonical ? null : `/booking/${effectiveSlug}`;
 
     if (salon.isHidden || salon.hidden) {
       return res.status(200).json({
         success: true,
         data: {
           ...salon.toObject(),
+          slug: effectiveSlug,
           isHidden: true,
           hidden: true,
           prestations: [],
-          staff: []
+          staff: [],
+          isCanonical,
+          redirectUrl
         }
       });
     }
@@ -350,10 +393,10 @@ exports.getSalonBySlug = async (req, res) => {
     await salon.checkSubscriptionTransition();
 
     // Fetch prestations for this salon
-    const prestations = await TypePrestation.find({ salon: salon._id, actif: true });
+    const prestations = await TypePrestation.find({ salon: salon._id, actif: { $ne: false } });
 
     // Fetch team (staff/owner/co_owner) for this salon
-    const team = await User.find({ salon: salon._id, actif: true, role: { $in: ['staff', 'owner', 'co_owner'] } });
+    const team = await User.find({ salon: salon._id, actif: { $ne: false }, role: { $in: ['staff', 'owner', 'co_owner'] } });
     const staff = team.map(member => ({
       id: member._id,
       nom: member.name,
@@ -363,7 +406,17 @@ exports.getSalonBySlug = async (req, res) => {
       availability: member.availability || null
     }));
 
-    res.status(200).json({ success: true, data: { ...salon.toObject(), prestations, staff } });
+    res.status(200).json({ 
+      success: true, 
+      data: { 
+        ...salon.toObject(), 
+        slug: effectiveSlug,
+        prestations, 
+        staff,
+        isCanonical,
+        redirectUrl
+      } 
+    });
   } catch (error) {
     sendErrorResponse(res, error);
   }
@@ -698,13 +751,15 @@ exports.getSalonAppointments = async (req, res) => {
   }
 };
 
-// 5.1 Salons: Get Share Preview (Open Graph metadata for crawlers)
+// 5.1 Salons: Get Share Preview & Full SSR HTML for Bots & Search Engines
 exports.getSalonSharePreview = async (req, res) => {
   try {
     const slug = req.params.slug;
     const isObjectId = slug.match(/^[0-9a-fA-F]{24}$/);
 
-    const query = isObjectId ? { _id: slug } : { slug: slug };
+    const query = isObjectId 
+      ? { $or: [{ _id: slug }, { slug: slug }, { oldSlugs: slug }] } 
+      : { $or: [{ slug: slug }, { oldSlugs: slug }] };
 
     const salon = await Salon.findOne(query);
     if (!salon) {
@@ -712,29 +767,27 @@ exports.getSalonSharePreview = async (req, res) => {
     }
 
     const salonName = salon.name || salon.nom || 'Salon';
+    const city = salon.ville || '';
+    const address = salon.address || '';
 
-    // Resolve language (accept-language header or query parameter or default country fallback)
+    // Fetch prestations for full SEO rendering
+    const prestations = await TypePrestation.find({ salon: salon._id, actif: true });
+
+    // Resolve language
     const acceptLang = req.headers['accept-language'] || '';
     const queryLang = req.query.lang || '';
     let isEnglish = queryLang.startsWith('en') ||
       (!queryLang.startsWith('fr') && acceptLang.toLowerCase().startsWith('en'));
 
-    if (!queryLang && !acceptLang) {
-      const engCountries = ['US', 'GB', 'CA', 'AU', 'NG', 'GH', 'KE', 'ZA'];
-      if (salon.pays && engCountries.includes(salon.pays.toUpperCase())) {
-        isEnglish = true;
-      }
-    }
-
-    const titleSuffix = isEnglish ? 'Booking' : 'Réservation';
+    const titleCity = city ? ` à ${city}` : '';
+    const title = `${salonName}${titleCity} | Coiffure, Beauté et Soins | BeautyFlow`;
     const defaultDesc = isEnglish
-      ? `Book your next appointment online at ${salonName} on BeautyFlow.`
-      : `Réservez votre prochain rendez-vous chez ${salonName} sur BeautyFlow.`;
+      ? `Discover ${salonName}${titleCity}. Check services, prices, working hours, reviews and book your appointment online on BeautyFlow.`
+      : `Découvrez ${salonName}${titleCity}. Consultez les services, tarifs, horaires, avis et réservez votre rendez-vous en ligne sur BeautyFlow.`;
 
-    const title = `${salonName} — ${titleSuffix}`;
     const description = salon.description || defaultDesc;
 
-    // Extract best salon image: cover banner > first gallery photo > logo
+    // Extract best salon image
     let rawImage = salon.branding?.bannerUrl || 
       salon.bannerUrl || 
       (salon.galleryUrls && salon.galleryUrls[0]) || 
@@ -760,9 +813,72 @@ exports.getSalonSharePreview = async (req, res) => {
       previewImage = `${frontendUrl}/beautyflow-banner.png`;
     }
 
-    const targetBookingUrl = `${frontendUrl}/booking/${salon.slug || slug}?lang=${isEnglish ? 'en' : 'fr'}`;
+    const canonicalUrl = `${frontendUrl}/salon/${salon.slug || slug}`;
 
-    // Serve HTML page populated with Open Graph meta tags for bot previews
+    // Determine Schema.org type
+    const typeLower = (salon.typeEtablissement || '').toLowerCase();
+    let schemaType = 'BeautySalon';
+    if (typeLower.includes('coiffure') || typeLower.includes('hair')) schemaType = 'HairSalon';
+    else if (typeLower.includes('barber') || typeLower.includes('barbier')) schemaType = 'Barbershop';
+
+    // Build JSON-LD structured data
+    const schemaData = {
+      "@context": "https://schema.org",
+      "@type": schemaType,
+      "name": salonName,
+      "description": description,
+      "url": canonicalUrl,
+      "image": previewImage,
+      "telephone": salon.phone || undefined,
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": address || undefined,
+        "addressLocality": city || undefined,
+        "addressCountry": salon.pays || "CM"
+      }
+    };
+
+    if (salon.location && salon.location.lat && salon.location.lng) {
+      schemaData.geo = {
+        "@type": "GeoCoordinates",
+        "latitude": salon.location.lat,
+        "longitude": salon.location.lng
+      };
+    }
+
+    if (prestations && prestations.length > 0) {
+      schemaData.hasOfferCatalog = {
+        "@type": "OfferCatalog",
+        "name": "Prestations",
+        "itemListElement": prestations.map(p => ({
+          "@type": "Offer",
+          "itemOffered": {
+            "@type": "Service",
+            "name": p.nom || p.name,
+            "description": p.description || undefined,
+            "offers": {
+              "@type": "Offer",
+              "price": (p.prix || '').toString().replace(/\D/g, '') || undefined,
+              "priceCurrency": salon.devise === 'FCFA' ? 'XAF' : (salon.devise || 'XAF')
+            }
+          }
+        }))
+      };
+    }
+
+    if (salon.rating && salon.reviewCount && salon.reviewCount > 0) {
+      schemaData.aggregateRating = {
+        "@type": "AggregateRating",
+        "ratingValue": salon.rating,
+        "reviewCount": salon.reviewCount
+      };
+    }
+
+    // Prestations HTML list
+    const prestationsHtml = prestations.map(p => 
+      `<li><strong>${p.nom || p.name}</strong> - ${p.prix || ''} (${p.duree || 30} min)<br/><small>${p.description || ''}</small></li>`
+    ).join('');
+
     res.setHeader('Content-Type', 'text/html');
     res.send(`<!DOCTYPE html>
 <html lang="${isEnglish ? 'en' : 'fr'}">
@@ -771,16 +887,14 @@ exports.getSalonSharePreview = async (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
   <meta name="description" content="${description}">
+  <link rel="canonical" href="${canonicalUrl}">
   
-  <!-- Open Graph / Facebook / WhatsApp / iMessage -->
+  <!-- Open Graph -->
   <meta property="og:site_name" content="BeautyFlow">
   <meta property="og:title" content="${title}">
   <meta property="og:description" content="${description}">
   <meta property="og:image" content="${previewImage}">
-  <meta property="og:image:secure_url" content="${previewImage}">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:url" content="${targetBookingUrl}">
+  <meta property="og:url" content="${canonicalUrl}">
   <meta property="og:type" content="website">
   
   <!-- Twitter -->
@@ -789,13 +903,29 @@ exports.getSalonSharePreview = async (req, res) => {
   <meta name="twitter:description" content="${description}">
   <meta name="twitter:image" content="${previewImage}">
 
-  <meta http-equiv="refresh" content="0;url=${targetBookingUrl}">
+  <!-- Schema.org JSON-LD -->
+  <script type="application/ld+json">
+${JSON.stringify(schemaData, null, 2)}
+  </script>
 </head>
-<body>
-  <h1>${salonName}</h1>
-  <p>${description}</p>
+<body style="font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6;">
+  <header>
+    <h1>${salonName}</h1>
+    <p><strong>Ville:</strong> ${city} | <strong>Adresse:</strong> ${address}</p>
+    <p>${description}</p>
+  </header>
+  <main>
+    <h2>Services et Prestations</h2>
+    <ul>
+      ${prestationsHtml || '<li>Prestations disponibles sur réservation en ligne.</li>'}
+    </ul>
+    ${salon.horaires ? `<h2>Horaires d'ouverture</h2><p>${salon.horaires}</p>` : ''}
+    <p><a href="${canonicalUrl}" style="background-color: #ec4899; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block;">Réserver un rendez-vous sur BeautyFlow</a></p>
+  </main>
   <script>
-    window.location.href = "${targetBookingUrl}";
+    if (!navigator.userAgent.match(/(bot|googlebot|crawler|spider|slurp|bingbot)/i)) {
+      window.location.href = "${canonicalUrl}";
+    }
   </script>
 </body>
 </html>`);
@@ -803,6 +933,120 @@ exports.getSalonSharePreview = async (req, res) => {
     console.error('Error generating share preview:', error);
     res.status(500).send('Server Error');
   }
+};
+
+// GET /sitemap.xml
+exports.generateSitemapXml = async (req, res) => {
+  try {
+    const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+
+    const salons = await Salon.find({ isActive: true, isHidden: { $ne: true }, hidden: { $ne: true } })
+      .select('slug ville typeEtablissement updatedAt');
+
+    const citiesSet = new Set();
+    salons.forEach(s => {
+      if (s.ville) {
+        const cleanCity = s.ville.toLowerCase().trim().replace(/\s+/g, '-');
+        if (cleanCity) citiesSet.add(cleanCity);
+      }
+    });
+
+    const nowIso = new Date().toISOString();
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+
+    const staticPages = [
+      { url: '/', priority: '1.0', changefreq: 'daily' },
+      { url: '/explorer', priority: '0.9', changefreq: 'daily' },
+      { url: '/privacy', priority: '0.3', changefreq: 'monthly' },
+      { url: '/pro', priority: '0.8', changefreq: 'weekly' },
+    ];
+
+    staticPages.forEach(p => {
+      xml += `  <url>\n`;
+      xml += `    <loc>${frontendUrl}${p.url}</loc>\n`;
+      xml += `    <lastmod>${nowIso}</lastmod>\n`;
+      xml += `    <changefreq>${p.changefreq}</changefreq>\n`;
+      xml += `    <priority>${p.priority}</priority>\n`;
+      xml += `  </url>\n`;
+    });
+
+    Array.from(citiesSet).forEach(citySlug => {
+      xml += `  <url>\n`;
+      xml += `    <loc>${frontendUrl}/salons/${citySlug}</loc>\n`;
+      xml += `    <lastmod>${nowIso}</lastmod>\n`;
+      xml += `    <changefreq>daily</changefreq>\n`;
+      xml += `    <priority>0.8</priority>\n`;
+      xml += `  </url>\n`;
+
+      xml += `  <url>\n`;
+      xml += `    <loc>${frontendUrl}/coiffeurs/${citySlug}</loc>\n`;
+      xml += `    <lastmod>${nowIso}</lastmod>\n`;
+      xml += `    <changefreq>daily</changefreq>\n`;
+      xml += `    <priority>0.7</priority>\n`;
+      xml += `  </url>\n`;
+
+      xml += `  <url>\n`;
+      xml += `    <loc>${frontendUrl}/barbiers/${citySlug}</loc>\n`;
+      xml += `    <lastmod>${nowIso}</lastmod>\n`;
+      xml += `    <changefreq>daily</changefreq>\n`;
+      xml += `    <priority>0.7</priority>\n`;
+      xml += `  </url>\n`;
+
+      xml += `  <url>\n`;
+      xml += `    <loc>${frontendUrl}/instituts-de-beaute/${citySlug}</loc>\n`;
+      xml += `    <lastmod>${nowIso}</lastmod>\n`;
+      xml += `    <changefreq>daily</changefreq>\n`;
+      xml += `    <priority>0.7</priority>\n`;
+      xml += `  </url>\n`;
+    });
+
+    salons.forEach(s => {
+      if (s.slug) {
+        xml += `  <url>\n`;
+        xml += `    <loc>${frontendUrl}/salon/${s.slug}</loc>\n`;
+        xml += `    <lastmod>${s.updatedAt ? new Date(s.updatedAt).toISOString() : nowIso}</lastmod>\n`;
+        xml += `    <changefreq>weekly</changefreq>\n`;
+        xml += `    <priority>0.9</priority>\n`;
+        xml += `  </url>\n`;
+      }
+    });
+
+    xml += `</urlset>`;
+
+    res.setHeader('Content-Type', 'text/xml');
+    res.status(200).send(xml);
+  } catch (error) {
+    console.error('Error generating sitemap XML:', error);
+    res.status(500).send('Server Error');
+  }
+};
+
+// GET /robots.txt
+exports.getRobotsTxt = async (req, res) => {
+  const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+  const robots = `User-agent: *
+Allow: /
+Allow: /salon/
+Allow: /salons/
+Allow: /coiffeurs/
+Allow: /barbiers/
+Allow: /instituts-de-beaute/
+Allow: /booking/
+Allow: /explorer
+
+Disallow: /pro/onboarding
+Disallow: /explorer/account
+Disallow: /admin/
+Disallow: /dashboard/
+Disallow: /api/
+
+Sitemap: ${frontendUrl}/sitemap.xml
+`;
+
+  res.setHeader('Content-Type', 'text/plain');
+  res.status(200).send(robots);
 };
 
 // GET /api/marketplace/bookings/count
@@ -954,6 +1198,108 @@ exports.confirmBookingCompletion = async (req, res, next) => {
       success: true,
       message: 'Prestation confirmée avec succès.',
       data: booking
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/marketplace/salons/:slug/track
+exports.trackSalonEvent = async (req, res, next) => {
+  try {
+    const { slug } = req.params;
+    const { eventType, customerName, customerPhone, customerEmail, selectedServices } = req.body;
+
+    const isObjectId = slug.match(/^[0-9a-fA-F]{24}$/);
+    const query = isObjectId ? { _id: slug } : { slug };
+
+    const salon = await Salon.findOne(query);
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable' });
+    }
+
+    const appUserId = req.appUser ? req.appUser._id : null;
+    const resolvedName = customerName || (req.appUser ? req.appUser.nom : 'Visiteur Anonyme');
+    const resolvedPhone = customerPhone || (req.appUser ? req.appUser.telephone : '');
+    const resolvedEmail = customerEmail || (req.appUser ? req.appUser.email : '');
+
+    const event = await SalonAnalyticsEvent.create({
+      salon: salon._id,
+      eventType: eventType || 'view_page',
+      customerName: resolvedName,
+      customerPhone: resolvedPhone,
+      customerEmail: resolvedEmail,
+      selectedServices: selectedServices || [],
+      appUser: appUserId,
+      userAgent: req.headers['user-agent'] || '',
+      ip: req.ip || ''
+    });
+
+    res.status(201).json({ success: true, data: event });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/marketplace/salons/:id/analytics (or /api/salons/:id/analytics)
+exports.getSalonAnalytics = async (req, res, next) => {
+  try {
+    const userSalonId = req.user?.salon?._id?.toString() || req.user?.salon?.toString();
+    const rawId = req.params.id || req.params.salonId || req.params.slug || req.query.salonId || (req.salon ? req.salon._id : null) || userSalonId;
+    if (!rawId) {
+      return res.status(400).json({ success: false, message: 'ID de salon requis' });
+    }
+
+    const isObjectId = String(rawId).match(/^[0-9a-fA-F]{24}$/);
+    const query = isObjectId ? { _id: rawId } : { slug: rawId };
+
+    const salon = await Salon.findOne(query);
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable' });
+    }
+
+    const rawEvents = await SalonAnalyticsEvent.find({ salon: salon._id })
+      .populate('appUser', 'nom telephone email avatarUrl')
+      .sort({ createdAt: -1 })
+      .limit(500);
+
+    const events = rawEvents.map(ev => {
+      const obj = ev.toObject();
+      if (obj.appUser) {
+        if (!obj.customerName || obj.customerName === 'Visiteur Anonyme') {
+          obj.customerName = obj.appUser.nom || 'Visiteur Connecté';
+        }
+        if (!obj.customerPhone) {
+          obj.customerPhone = obj.appUser.telephone || '';
+        }
+        if (!obj.customerEmail) {
+          obj.customerEmail = obj.appUser.email || '';
+        }
+      }
+      return obj;
+    });
+
+    const totalViews = await SalonAnalyticsEvent.countDocuments({ salon: salon._id, eventType: 'view_page' });
+    const totalBookingStarts = await SalonAnalyticsEvent.countDocuments({ salon: salon._id, eventType: 'booking_started' });
+    const totalConfirmedBookings = await Rendezvous.countDocuments({ salon: salon._id, statut: { $ne: 'annule' } });
+
+    const conversionRate = totalViews > 0 ? ((totalConfirmedBookings / totalViews) * 100).toFixed(1) : '0';
+
+    const stats = {
+      totalViews,
+      totalBookingStarts,
+      totalConfirmedBookings,
+      conversionRate
+    };
+
+    res.status(200).json({
+      success: true,
+      stats,
+      events,
+      data: {
+        stats,
+        events
+      }
     });
   } catch (err) {
     next(err);

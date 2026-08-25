@@ -71,6 +71,56 @@ const permissions = {
 
 exports.buildSessionResponse = buildSessionResponse;
 
+// @desc    Register a new salon owner (Pro)
+// @route   POST /api/auth/register
+// @access  Public
+exports.register = async (req, res, next) => {
+  try {
+    const { name, nom, email, password, telephone, ville, pays, affiliateCode } = req.body;
+    const fullName = name || nom;
+
+    if (!fullName || !email || !password) {
+      return res.status(400).json({ success: false, message: 'Nom, email et mot de passe requis' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: 'Le mot de passe doit contenir au moins 6 caractères' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Vérifier si un User existe déjà
+    const userExists = await User.findOne({ email: cleanEmail });
+    if (userExists) {
+      return res.status(400).json({ success: false, message: 'Cet email est déjà associé à un compte. Veuillez vous connecter.' });
+    }
+
+    // Créer le propriétaire
+    const user = await User.create({
+      name: fullName.trim(),
+      email: cleanEmail,
+      password,
+      telephone: telephone ? telephone.trim() : undefined,
+      ville: ville ? ville.trim() : '',
+      pays: pays ? pays.trim() : 'CM',
+      role: 'owner',
+      affiliateCode: affiliateCode ? affiliateCode.trim().toUpperCase() : undefined,
+      actif: true,
+    });
+
+    const token = user.getSignedJwtToken();
+    const sessionRes = buildSessionResponse(user, null, token);
+
+    res.status(201).json({
+      success: true,
+      ...sessionRes,
+    });
+  } catch (err) {
+    console.error('Erreur lors de l\'enregistrement owner:', err);
+    next(err);
+  }
+};
+
 // @desc    Login
 // @route   POST /api/auth/login
 // @access  Public
@@ -78,19 +128,16 @@ exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
-
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
     }
-    let user = await User.findOne({ email }).select('+password').populate('salon');
+    let user = await User.findOne({ email: email.toLowerCase().trim() }).select('+password').populate('salon');
     if (!user) {
-      user = await Affiliate.findOne({ email }).select('+password');
+      user = await Affiliate.findOne({ email: email.toLowerCase().trim() }).select('+password');
     }
     if (!user) {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
     }
-
-
 
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
@@ -104,28 +151,31 @@ exports.login = async (req, res, next) => {
     // Vérification abonnement pour owner/staff
     if (user.role !== 'admin' && user.role !== 'affiliate') {
       if (!user.salon) {
-        return res.status(403).json({
-          success: false,
-          message: "Aucun salon n'est associé à ce compte. Veuillez finaliser votre inscription ou contacter le support.",
-        });
-      }
+        if (user.role !== 'owner' && user.role !== 'co_owner') {
+          return res.status(403).json({
+            success: false,
+            message: "Aucun salon n'est associé à ce compte. Veuillez contacter l'administrateur de votre salon.",
+          });
+        }
+        // Si c'est un owner sans salon (ex: en cours d'onboarding), on l'autorise pour qu'il puisse configurer son salon
+      } else {
+        // Vérification que le salon existe réellement en base (cas de salon supprimé)
+        const Salon = require('../models/Salon');
+        const salonDoc = await Salon.findById(user.salon._id || user.salon);
+        if (!salonDoc) {
+          return res.status(403).json({
+            success: false,
+            message: "Salon introuvable — ce salon n'existe plus dans le système. Veuillez contacter le support.",
+          });
+        }
 
-      // Vérification que le salon existe réellement en base (cas de salon supprimé)
-      const Salon = require('../models/Salon');
-      const salonDoc = await Salon.findById(user.salon._id || user.salon);
-      if (!salonDoc) {
-        return res.status(403).json({
-          success: false,
-          message: "Salon introuvable — ce salon n'existe plus dans le système. Veuillez contacter le support.",
-        });
-      }
-
-      const salon = salonDoc;
-      if (!salon.isActive || new Date() > new Date(salon.abonnement?.dateFin)) {
-        return res.status(403).json({
-          success: false,
-          message: 'Abonnement expiré — veuillez contacter Beautyflow',
-        });
+        const salon = salonDoc;
+        if (!salon.isActive || new Date() > new Date(salon.abonnement?.dateFin)) {
+          return res.status(403).json({
+            success: false,
+            message: 'Abonnement expiré — veuillez contacter Beautyflow',
+          });
+        }
       }
     }
 
@@ -135,7 +185,7 @@ exports.login = async (req, res, next) => {
     await user.save();
 
     const token = user.getSignedJwtToken();
-    const salon = user.role === 'admin' ? null : user.salon;
+    const salon = (user.role === 'admin' || user.role === 'affiliate') ? null : user.salon;
     console.log('Login réussi pour email:', salon ? `${email} (Salon: ${salon.name})` : email);
     res.status(200).json({
       success: true,

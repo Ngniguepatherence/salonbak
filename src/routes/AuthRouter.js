@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { 
   login, 
+  register,
   adminLogin, 
   updatePassword, 
   getMe, 
@@ -26,6 +27,7 @@ const loginLimiter = rateLimit({
   message: { success: false, message: 'Too many requests' }
 });
 
+router.post('/register', loginLimiter, register);
 router.post('/login', loginLimiter, login);
 router.post('/admin-login', loginLimiter, adminLogin);
 

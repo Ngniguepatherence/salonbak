@@ -40,10 +40,29 @@ class PawapayService {
    * Initie un paiement USSD Push (Deposit V2)
    * Doc V2: POST /v2/deposits
    */
-  async initiateDeposit({ depositId, amount, phone, clientReferenceId, description, provider }) {
+  async initiateDeposit({ depositId, amount, phone, clientReferenceId, description, provider, currency }) {
+    let cleanPhone = phone ? phone.replace(/\D/g, '') : '';
+    if (cleanPhone.startsWith('00')) {
+      cleanPhone = cleanPhone.slice(2);
+    }
+
+    // Determine target currency based on provider or explicit param
+    let depositCurrency = currency;
+    if (!depositCurrency) {
+      if (provider) {
+        if (provider.endsWith('_CIV') || provider.endsWith('_SEN') || provider.endsWith('_BEN')) depositCurrency = 'XOF';
+        else if (provider.endsWith('_GHA')) depositCurrency = 'GHS';
+        else if (provider.endsWith('_KEN')) depositCurrency = 'KES';
+        else if (provider.endsWith('_NGA')) depositCurrency = 'NGN';
+        else depositCurrency = 'XAF';
+      } else {
+        depositCurrency = 'XAF';
+      }
+    }
+
     if (!this.apiToken) {
       // Si pas de token, on retourne un objet mocké pour le mode dev
-      console.log(`[PAWAPAY MOCK] Dépôt initié : ${amount} XAF au ${phone} (Ref: ${clientReferenceId}, Provider: ${provider})`);
+      console.log(`[PAWAPAY MOCK] Dépôt initié : ${amount} ${depositCurrency} au ${cleanPhone} (Ref: ${clientReferenceId}, Provider: ${provider})`);
       return {
         depositId,
         status: 'SUBMITTED',
@@ -52,20 +71,13 @@ class PawapayService {
     }
 
     try {
-      let cleanPhone = phone ? phone.replace(/\D/g, '') : '';
-      if (cleanPhone.startsWith('00237')) {
-        cleanPhone = cleanPhone.slice(2);
-      } else if (!cleanPhone.startsWith('237') && cleanPhone.length === 9) {
-        cleanPhone = '237' + cleanPhone;
-      }
-
       // Le message client doit faire entre 4 et 22 caractères (uniquement alphanumérique + espace)
       const customerMessage = this.sanitizeCustomerMessage(description, 'BeautyFlow Payment');
 
       const payload = {
         depositId,
         amount: amount.toString(),
-        currency: 'XAF',
+        currency: depositCurrency,
         payer: {
           type: 'MMO',
           accountDetails: {
@@ -127,11 +139,7 @@ class PawapayService {
         throw new Error(responseData?.message || `Erreur HTTP ${response.status} lors de la vérification du dépôt chez pawaPay`);
       }
 
-      const rawItem = Array.isArray(responseData) ? responseData[0] : responseData;
-      const data = (rawItem && rawItem.data && typeof rawItem.data === 'object')
-        ? { ...rawItem.data, apiStatus: rawItem.status }
-        : rawItem;
-      return data;
+      return responseData;
     } catch (error) {
       console.error('Erreur getDepositStatus pawaPay:', error.cause?.message || error.message);
       throw error;
@@ -139,59 +147,41 @@ class PawapayService {
   }
 
   /**
-   * Initie un transfert d'argent (Payout V2) - Utile pour payer les salons (Marketplace)
+   * Initie un paiement de remboursement (Payout V2)
    * Doc V2: POST /v2/payouts
    */
-  async initiatePayout({
-    payoutId,
-    amount,
-    phone,
-    provider,
-    description,
-    clientReferenceId,
-    currency = 'XAF',
-    customerMessage: customMessage,
-    metadata,
-    recipientType = 'MMO'
-  }) {
-    let cleanPhone = phone ? phone.replace(/\D/g, '') : '';
-    if (cleanPhone.startsWith('00237')) {
-      cleanPhone = cleanPhone.slice(2);
-    } else if (!cleanPhone.startsWith('237') && cleanPhone.length === 9) {
-      cleanPhone = '237' + cleanPhone;
-    }
-
-    const customerMessage = this.sanitizeCustomerMessage(customMessage || description, 'BeautyFlow Payout');
-    const refId = clientReferenceId || payoutId;
-
+  async initiatePayout({ payoutId, amount, phone, clientReferenceId, description, provider, currency = 'XAF' }) {
     if (!this.apiToken) {
-      console.log(`[PAWAPAY MOCK] Payout initié : ${amount} ${currency} au ${cleanPhone} (Ref: ${refId}, Provider: ${provider})`);
+      console.log(`[PAWAPAY MOCK] Payout initié : ${amount} ${currency} au ${phone} (Ref: ${clientReferenceId}, Provider: ${provider})`);
       return {
         payoutId,
-        status: 'SUBMITTED',
-        clientReferenceId: refId
+        status: 'ACCEPTED',
+        clientReferenceId,
       };
     }
 
     try {
+      let cleanPhone = phone ? phone.replace(/\D/g, '') : '';
+      if (cleanPhone.startsWith('00')) {
+        cleanPhone = cleanPhone.slice(2);
+      }
+
+      const customerMessage = this.sanitizeCustomerMessage(description, 'BeautyFlow Payout');
+
       const payload = {
         payoutId,
+        amount: amount.toString(),
+        currency,
         recipient: {
-          type: recipientType,
+          type: 'MMO',
           accountDetails: {
             phoneNumber: cleanPhone,
-            provider: provider
+            provider: provider || 'MTN_MOMO_CMR'
           }
         },
-        amount: amount.toString(),
-        currency: currency,
-        clientReferenceId: refId,
+        clientReferenceId,
         customerMessage
       };
-
-      if (metadata) {
-        payload.metadata = metadata;
-      }
 
       console.log('[PAWAPAY API V2] Envoi de la requête de Payout :', JSON.stringify(payload, null, 2));
 
@@ -207,7 +197,7 @@ class PawapayService {
         console.error('Erreur HTTP initiatePayout pawaPay:', data);
         throw new Error(data?.message || `Erreur HTTP ${response.status} lors de l'initiation du Payout chez pawaPay`);
       }
-      console.log(data);
+
       return data;
     } catch (error) {
       console.error('Erreur initiatePayout pawaPay:', error.message);
@@ -241,12 +231,7 @@ class PawapayService {
         throw new Error(responseData?.message || `Erreur HTTP ${response.status} lors de la vérification du Payout chez pawaPay`);
       }
 
-      const rawItem = Array.isArray(responseData) ? responseData[0] : responseData;
-      const data = (rawItem && rawItem.data && typeof rawItem.data === 'object')
-        ? { ...rawItem.data, apiStatus: rawItem.status }
-        : rawItem;
-      console.log('[PAWAPAY API V2] Statut du Payout :', data);
-      return data;
+      return responseData;
     } catch (error) {
       console.error('Erreur getPayoutStatus pawaPay:', error.message);
       throw error;
@@ -255,31 +240,31 @@ class PawapayService {
 
 
   /**
-   * Initie une demande de remboursement (Refund V2)
+   * Effectue un remboursement (Refund V2)
    * Doc V2: POST /v2/refunds
    */
-  async initiateRefund({ refundId, depositId, amount, description }) {
+  async initiateRefund({ refundId, depositId, amount }) {
     if (!this.apiToken) {
-      console.log(`[PAWAPAY MOCK] Remboursement initié pour le dépôt : ${depositId} (Montant: ${amount})`);
+      console.log(`[PAWAPAY MOCK] Remboursement initié pour ${depositId} : ${amount} XAF (RefundId: ${refundId})`);
       return {
         refundId,
         status: 'ACCEPTED',
+        depositId
       };
     }
 
     try {
+      const payload = {
+        refundId,
+        depositId,
+        amount: amount.toString()
+      };
+
       const response = await axios.post(
         `${this.apiBaseUrl}/v2/refunds`,
-        {
-          refundId,
-          depositId,
-          amount: amount.toString(),
-          currency: 'XAF',
-          description: description || 'BeautyFlow Refund',
-        },
+        payload,
         { headers: this.getHeaders() }
       );
-
       return response.data;
     } catch (error) {
       console.error('Erreur initiateRefund pawaPay:', error?.response?.data || error.message);
@@ -288,43 +273,116 @@ class PawapayService {
   }
 
   /**
-   * Obtient la configuration active (pays, providers)
+   * Obtient la configuration active (Active Config V2)
    * Doc V2: GET /v2/active-conf
    */
   async getActiveConfig(country = 'CMR', operationType = 'DEPOSIT') {
+    const cUpper = (country || 'CMR').toUpperCase();
+
     if (!this.apiToken) {
-      // Mock for development
+      const MOCK_CONFIGS = {
+        CIV: {
+          country: "CIV",
+          prefix: "225",
+          flag: "https://static-content.pawapay.io/country_flags/ci.svg",
+          displayName: { en: "Ivory Coast", fr: "Côte d'Ivoire" },
+          providers: [
+            { provider: "WAVE_CIV", displayName: "Wave", nameDisplayedToCustomer: "Wave Côte d’Ivoire", logo: "https://static-content.pawapay.io/company_logos/wave.png", currencies: [{ currency: "XOF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] },
+            { provider: "ORANGE_CIV", displayName: "Orange", nameDisplayedToCustomer: "Orange Money CI", logo: "https://static-content.pawapay.io/company_logos/orange.png", currencies: [{ currency: "XOF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: true } } }] },
+            { provider: "MTN_MOMO_CIV", displayName: "MTN", nameDisplayedToCustomer: "MTN Mobile Money CI", logo: "https://static-content.pawapay.io/company_logos/mtn.png", currencies: [{ currency: "XOF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] },
+            { provider: "MOOV_CIV", displayName: "Moov", nameDisplayedToCustomer: "Moov Money CI", logo: "https://static-content.pawapay.io/company_logos/moov.png", currencies: [{ currency: "XOF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] }
+          ]
+        },
+        CMR: {
+          country: "CMR",
+          prefix: "237",
+          flag: "https://static-content.pawapay.io/country_flags/cmr.svg",
+          displayName: { en: "Cameroon", fr: "Cameroun" },
+          providers: [
+            { provider: "ORANGE_CMR", displayName: "Orange", nameDisplayedToCustomer: "Orange Money", logo: "https://static-content.pawapay.io/company_logos/orange.png", currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: true } } }] },
+            { provider: "MTN_MOMO_CMR", displayName: "MTN", nameDisplayedToCustomer: "MTN Mobile Money", logo: "https://static-content.pawapay.io/company_logos/mtn.png", currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] }
+          ]
+        },
+        SEN: {
+          country: "SEN",
+          prefix: "221",
+          flag: "https://static-content.pawapay.io/country_flags/sn.svg",
+          displayName: { en: "Senegal", fr: "Sénégal" },
+          providers: [
+            { provider: "WAVE_SEN", displayName: "Wave", nameDisplayedToCustomer: "Wave Sénégal", logo: "https://static-content.pawapay.io/company_logos/wave.png", currencies: [{ currency: "XOF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] },
+            { provider: "ORANGE_SEN", displayName: "Orange", nameDisplayedToCustomer: "Orange Money Sénégal", logo: "https://static-content.pawapay.io/company_logos/orange.png", currencies: [{ currency: "XOF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] },
+            { provider: "FREE_SEN", displayName: "Free", nameDisplayedToCustomer: "Free Money", logo: "https://static-content.pawapay.io/company_logos/free.png", currencies: [{ currency: "XOF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] }
+          ]
+        },
+        GHA: {
+          country: "GHA",
+          prefix: "233",
+          flag: "https://static-content.pawapay.io/country_flags/gh.svg",
+          displayName: { en: "Ghana", fr: "Ghana" },
+          providers: [
+            { provider: "MTN_MOMO_GHA", displayName: "MTN", nameDisplayedToCustomer: "MTN Mobile Money Ghana", logo: "https://static-content.pawapay.io/company_logos/mtn.png", currencies: [{ currency: "GHS", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] },
+            { provider: "VODAFONE_GHA", displayName: "Telecel", nameDisplayedToCustomer: "Telecel Cash", logo: "https://static-content.pawapay.io/company_logos/vodafone.png", currencies: [{ currency: "GHS", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] }
+          ]
+        },
+        KEN: {
+          country: "KEN",
+          prefix: "254",
+          flag: "https://static-content.pawapay.io/country_flags/ke.svg",
+          displayName: { en: "Kenya", fr: "Kenya" },
+          providers: [
+            { provider: "MPESA_KEN", displayName: "M-Pesa", nameDisplayedToCustomer: "M-Pesa Safaricom", logo: "https://static-content.pawapay.io/company_logos/mpesa.png", currencies: [{ currency: "KES", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] }
+          ]
+        },
+        GAB: {
+          country: "GAB",
+          prefix: "241",
+          flag: "https://static-content.pawapay.io/country_flags/ga.svg",
+          displayName: { en: "Gabon", fr: "Gabon" },
+          providers: [
+            { provider: "AIRTEL_GAB", displayName: "Airtel", nameDisplayedToCustomer: "Airtel Money Gabon", logo: "https://static-content.pawapay.io/company_logos/airtel.png", currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] },
+            { provider: "MOOV_GAB", displayName: "Moov", nameDisplayedToCustomer: "Moov Money Gabon", logo: "https://static-content.pawapay.io/company_logos/moov.png", currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] }
+          ]
+        },
+        COG: {
+          country: "COG",
+          prefix: "242",
+          flag: "https://static-content.pawapay.io/country_flags/cg.svg",
+          displayName: { en: "Congo", fr: "Congo" },
+          providers: [
+            { provider: "MTN_MOMO_COG", displayName: "MTN", nameDisplayedToCustomer: "MTN Mobile Money Congo", logo: "https://static-content.pawapay.io/company_logos/mtn.png", currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] },
+            { provider: "AIRTEL_COG", displayName: "Airtel", nameDisplayedToCustomer: "Airtel Money Congo", logo: "https://static-content.pawapay.io/company_logos/airtel.png", currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] }
+          ]
+        },
+        TCD: {
+          country: "TCD",
+          prefix: "235",
+          flag: "https://static-content.pawapay.io/country_flags/td.svg",
+          displayName: { en: "Chad", fr: "Tchad" },
+          providers: [
+            { provider: "AIRTEL_TCD", displayName: "Airtel", nameDisplayedToCustomer: "Airtel Money Tchad", logo: "https://static-content.pawapay.io/company_logos/airtel.png", currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] },
+            { provider: "MOOV_TCD", displayName: "Moov", nameDisplayedToCustomer: "Moov Money Tchad", logo: "https://static-content.pawapay.io/company_logos/moov.png", currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] }
+          ]
+        },
+        BEN: {
+          country: "BEN",
+          prefix: "229",
+          flag: "https://static-content.pawapay.io/country_flags/bj.svg",
+          displayName: { en: "Benin", fr: "Bénin" },
+          providers: [
+            { provider: "MTN_MOMO_BEN", displayName: "MTN", nameDisplayedToCustomer: "MTN Mobile Money Bénin", logo: "https://static-content.pawapay.io/company_logos/mtn.png", currencies: [{ currency: "XOF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] },
+            { provider: "MOOV_BEN", displayName: "Moov", nameDisplayedToCustomer: "Moov Money Bénin", logo: "https://static-content.pawapay.io/company_logos/moov.png", currencies: [{ currency: "XOF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }] }
+          ]
+        }
+      };
+
+      const selectedConf = MOCK_CONFIGS[cUpper] || MOCK_CONFIGS.CIV;
       return {
-        companyName: "Dev Mode",
-        countries: [
-          {
-            country: country,
-            prefix: "237",
-            flag: "https://static-content.pawapay.io/country_flags/cmr.svg",
-            displayName: { en: "Cameroon", fr: "Cameroun" },
-            providers: [
-              {
-                provider: "MTN_MOMO_CMR",
-                displayName: "MTN",
-                nameDisplayedToCustomer: "MTN Mobile Money",
-                logo: "https://static-content.pawapay.io/company_logos/mtn.png",
-                currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: true } } }]
-              },
-              {
-                provider: "ORANGE_CMR",
-                displayName: "Orange",
-                nameDisplayedToCustomer: "Orange Money",
-                logo: "https://static-content.pawapay.io/company_logos/orange.png",
-                currencies: [{ currency: "XAF", operationTypes: { DEPOSIT: { authType: "PROVIDER_AUTH", pinPrompt: "AUTOMATIC", pinPromptRevivable: false } } }]
-              }
-            ]
-          }
-        ]
+        countries: [selectedConf]
       };
     }
     try {
       const response = await axios.get(
-        `${this.apiBaseUrl}/v2/active-conf?country=${country}&operationType=${operationType}`,
+        `${this.apiBaseUrl}/v2/active-conf?country=${cUpper}&operationType=${operationType}`,
         { headers: this.getHeaders() }
       );
       return response.data;
@@ -340,17 +398,40 @@ class PawapayService {
    */
   async predictProvider(phoneNumber) {
     if (!this.apiToken) {
-      // Mock for development
-      let provider = 'MTN_MOMO_CMR';
-      let cleanPhone = phoneNumber.replace(/\D/g, '');
-      const localPhone = cleanPhone.startsWith('237') ? cleanPhone.slice(3) : cleanPhone;
-      if (localPhone.startsWith('69') || localPhone.startsWith('655') || localPhone.startsWith('656') || localPhone.startsWith('657') || localPhone.startsWith('658') || localPhone.startsWith('659')) {
-        provider = 'ORANGE_CMR';
+      let cleanPhone = phoneNumber ? phoneNumber.replace(/\D/g, '') : '';
+      let provider = 'ORANGE_CIV';
+      let country = 'CIV';
+
+      if (cleanPhone.startsWith('225') || cleanPhone.length === 10) {
+        country = 'CIV';
+        const local = cleanPhone.startsWith('225') ? cleanPhone.slice(3) : cleanPhone;
+        if (/^(07|08|09|77|78|79)/.test(local)) provider = 'ORANGE_CIV';
+        else if (/^(05|06|54|55|56)/.test(local)) provider = 'MTN_MOMO_CIV';
+        else if (/^(01|02|03)/.test(local)) provider = 'MOOV_CIV';
+        else provider = 'WAVE_CIV';
+      } else if (cleanPhone.startsWith('237')) {
+        country = 'CMR';
+        const local = cleanPhone.slice(3);
+        if (local.startsWith('69') || /^65[5-9]/.test(local)) provider = 'ORANGE_CMR';
+        else provider = 'MTN_MOMO_CMR';
+      } else if (cleanPhone.startsWith('221')) {
+        country = 'SEN';
+        provider = 'WAVE_SEN';
+      } else if (cleanPhone.startsWith('241')) {
+        country = 'GAB';
+        provider = 'AIRTEL_GAB';
+      } else if (cleanPhone.startsWith('242')) {
+        country = 'COG';
+        provider = 'MTN_MOMO_COG';
+      } else if (cleanPhone.startsWith('235')) {
+        country = 'TCD';
+        provider = 'AIRTEL_TCD';
       }
+
       return {
-        country: 'CMR',
+        country,
         provider,
-        phoneNumber: cleanPhone.startsWith('237') ? cleanPhone : '237' + cleanPhone
+        phoneNumber: cleanPhone
       };
     }
     try {
