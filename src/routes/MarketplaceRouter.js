@@ -15,6 +15,7 @@ const {
   initiateGoogleAuth,
   googleAuthCallback,
   getSalonSharePreview,
+  getCitySharePreview,
   getBookingsCount,
   getClientBookings,
   getClientLoyalty,
@@ -55,6 +56,8 @@ router.post('/auth/favorites/toggle', protectAppUser, toggleFavorite);
 router.get('/salons', getSalons);
 router.get('/salons/:slug', getSalonBySlug);
 router.get('/salons/:slug/share-preview', getSalonSharePreview);
+router.get('/salons/city-preview/:city', getCitySharePreview);
+router.get('/salons/city-preview/:category/:city', getCitySharePreview);
 router.get('/salons/:slug/appointments', getSalonAppointments);
 router.post('/salons/:slug/track', optionalAppUser, trackSalonEvent);
 router.get('/salons/:id/analytics', getSalonAnalytics);

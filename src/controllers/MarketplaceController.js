@@ -769,6 +769,7 @@ exports.getSalonSharePreview = async (req, res) => {
     const salonName = salon.name || salon.nom || 'Salon';
     const city = salon.ville || '';
     const address = salon.address || '';
+    const country = salon.pays || 'CM';
 
     // Fetch prestations for full SEO rendering
     const prestations = await TypePrestation.find({ salon: salon._id, actif: true });
@@ -780,10 +781,10 @@ exports.getSalonSharePreview = async (req, res) => {
       (!queryLang.startsWith('fr') && acceptLang.toLowerCase().startsWith('en'));
 
     const titleCity = city ? ` à ${city}` : '';
-    const title = `${salonName}${titleCity} | Coiffure, Beauté et Soins | BeautyFlow`;
+    const title = `${salonName}${titleCity} | Coiffure, Beauté, Tarifs & Rendez-vous | BeautyFlow Africa`;
     const defaultDesc = isEnglish
-      ? `Discover ${salonName}${titleCity}. Check services, prices, working hours, reviews and book your appointment online on BeautyFlow.`
-      : `Découvrez ${salonName}${titleCity}. Consultez les services, tarifs, horaires, avis et réservez votre rendez-vous en ligne sur BeautyFlow.`;
+      ? `Book an appointment at ${salonName}${titleCity}. View opening hours, prices, verified customer reviews and book 24/7 on BeautyFlow Africa.`
+      : `Réservez votre rendez-vous chez ${salonName}${titleCity}. Consultez les prestations, tarifs, horaires, avis clients vérifiés et réservez en ligne 24h/24 sur BeautyFlow Africa.`;
 
     const description = salon.description || defaultDesc;
 
@@ -814,42 +815,98 @@ exports.getSalonSharePreview = async (req, res) => {
     }
 
     const canonicalUrl = `${frontendUrl}/salon/${salon.slug || slug}`;
+    const citySlug = city.toLowerCase().trim().replace(/\s+/g, '-');
+    const cityUrl = city ? `${frontendUrl}/salons/${citySlug}` : `${frontendUrl}/explorer`;
 
     // Determine Schema.org type
     const typeLower = (salon.typeEtablissement || '').toLowerCase();
     let schemaType = 'BeautySalon';
-    if (typeLower.includes('coiffure') || typeLower.includes('hair')) schemaType = 'HairSalon';
-    else if (typeLower.includes('barber') || typeLower.includes('barbier')) schemaType = 'Barbershop';
+    let humanCategory = 'Salon de Beauté';
+    if (typeLower.includes('coiffure') || typeLower.includes('hair')) {
+      schemaType = 'HairSalon';
+      humanCategory = 'Salon de Coiffure';
+    } else if (typeLower.includes('barber') || typeLower.includes('barbier')) {
+      schemaType = 'Barbershop';
+      humanCategory = 'Barber Shop';
+    } else if (typeLower.includes('spa')) {
+      schemaType = 'DaySpa';
+      humanCategory = 'Spa & Bien-être';
+    } else if (typeLower.includes('ongle') || typeLower.includes('nail')) {
+      schemaType = 'NailSalon';
+      humanCategory = 'Bar à Ongles / Onglerie';
+    }
 
-    // Build JSON-LD structured data
-    const schemaData = {
+    // Calculate price range
+    let priceRange = '$$';
+    if (prestations && prestations.length > 0) {
+      const numericPrices = prestations
+        .map(p => typeof p.prix === 'number' ? p.prix : parseInt((p.prix || '').toString().replace(/\D/g, ''), 10))
+        .filter(n => !isNaN(n) && n > 0);
+      if (numericPrices.length > 0) {
+        const minPrice = Math.min(...numericPrices);
+        const maxPrice = Math.max(...numericPrices);
+        const currency = salon.devise || 'FCFA';
+        priceRange = `${minPrice.toLocaleString()} ${currency} - ${maxPrice.toLocaleString()} ${currency}`;
+      }
+    }
+
+    // Build Schema.org JSON-LD LocalBusiness data
+    const businessSchema = {
       "@context": "https://schema.org",
       "@type": schemaType,
+      "@id": canonicalUrl,
       "name": salonName,
       "description": description,
       "url": canonicalUrl,
       "image": previewImage,
       "telephone": salon.phone || undefined,
+      "email": salon.email || undefined,
+      "priceRange": priceRange,
+      "currenciesAccepted": salon.devise === 'FCFA' ? 'XAF, XOF, EUR, USD' : (salon.devise || 'XAF'),
+      "paymentAccepted": "Cash, Orange Money, MTN Mobile Money, Moov Money, Wave, Carte Bancaire",
       "address": {
         "@type": "PostalAddress",
         "streetAddress": address || undefined,
         "addressLocality": city || undefined,
-        "addressCountry": salon.pays || "CM"
+        "addressCountry": country
+      },
+      "potentialAction": {
+        "@type": "ReserveAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": `${canonicalUrl}/book`,
+          "inLanguage": isEnglish ? "en" : "fr",
+          "actionPlatform": [
+            "http://schema.org/DesktopWebPlatform",
+            "http://schema.org/MobileWebPlatform",
+            "http://schema.org/IOSPlatform",
+            "http://schema.org/AndroidPlatform"
+          ]
+        },
+        "result": {
+          "@type": "Reservation",
+          "name": `Réservation en ligne chez ${salonName}`
+        }
       }
     };
 
     if (salon.location && salon.location.lat && salon.location.lng) {
-      schemaData.geo = {
+      businessSchema.geo = {
         "@type": "GeoCoordinates",
         "latitude": salon.location.lat,
         "longitude": salon.location.lng
       };
+      businessSchema.hasMap = `https://www.google.com/maps/search/?api=1&query=${salon.location.lat},${salon.location.lng}`;
+    }
+
+    if (salon.horaires) {
+      businessSchema.openingHours = salon.horaires;
     }
 
     if (prestations && prestations.length > 0) {
-      schemaData.hasOfferCatalog = {
+      businessSchema.hasOfferCatalog = {
         "@type": "OfferCatalog",
-        "name": "Prestations",
+        "name": `Prestations & Tarifs ${salonName}`,
         "itemListElement": prestations.map(p => ({
           "@type": "Offer",
           "itemOffered": {
@@ -867,19 +924,86 @@ exports.getSalonSharePreview = async (req, res) => {
     }
 
     if (salon.rating && salon.reviewCount && salon.reviewCount > 0) {
-      schemaData.aggregateRating = {
+      businessSchema.aggregateRating = {
         "@type": "AggregateRating",
         "ratingValue": salon.rating,
-        "reviewCount": salon.reviewCount
+        "reviewCount": salon.reviewCount,
+        "bestRating": "5",
+        "worstRating": "1"
       };
     }
 
+    // BreadcrumbList Schema
+    const breadcrumbSchema = {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Accueil",
+          "item": frontendUrl
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": city ? `Salons à ${city}` : "Explorer",
+          "item": cityUrl
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": salonName,
+          "item": canonicalUrl
+        }
+      ]
+    };
+
+    // FAQPage Schema for rich snippet indexing
+    const faqSchema = {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": `Comment réserver un rendez-vous chez ${salonName} ?`,
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": `Vous pouvez réserver directement et gratuitement votre rendez-vous chez ${salonName} en ligne sur BeautyFlow Africa 24h/24 et 7j/7 en choisissant vos prestations et votre créneau horaire.`
+          }
+        },
+        {
+          "@type": "Question",
+          "name": `Où se trouve ${salonName}${titleCity} ?`,
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": `${salonName} est situé à l'adresse suivante : ${address ? address + (city ? ', ' + city : '') : (city || 'en Afrique')}.`
+          }
+        },
+        {
+          "@type": "Question",
+          "name": `Quels sont les tarifs et moyens de paiement chez ${salonName} ?`,
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": `Les tarifs des prestations chez ${salonName} s'échelonnent dans la fourchette ${priceRange}. Les paiements sont acceptés en espèces, Orange Money, MTN Mobile Money, Wave ou carte bancaire selon les modalités du salon.`
+          }
+        }
+      ]
+    };
+
     // Prestations HTML list
     const prestationsHtml = prestations.map(p => 
-      `<li><strong>${p.nom || p.name}</strong> - ${p.prix || ''} (${p.duree || 30} min)<br/><small>${p.description || ''}</small></li>`
+      `<li style="margin-bottom: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 1.05rem;">
+          <span>${p.nom || p.name}</span>
+          <span style="color: #e11d48;">${p.prix || ''}</span>
+        </div>
+        ${p.duree ? `<div style="font-size: 0.85rem; color: #64748b;">Durée: ${p.duree} minutes</div>` : ''}
+        ${p.description ? `<div style="font-size: 0.9rem; color: #475569; margin-top: 4px;">${p.description}</div>` : ''}
+      </li>`
     ).join('');
 
-    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!DOCTYPE html>
 <html lang="${isEnglish ? 'en' : 'fr'}">
 <head>
@@ -890,7 +1014,279 @@ exports.getSalonSharePreview = async (req, res) => {
   <link rel="canonical" href="${canonicalUrl}">
   
   <!-- Open Graph -->
-  <meta property="og:site_name" content="BeautyFlow">
+  <meta property="og:site_name" content="BeautyFlow Africa">
+  <meta property="og:title" content="${title}">
+  <meta property="og:description" content="${description}">
+  <meta property="og:image" content="${previewImage}">
+  <meta property="og:url" content="${canonicalUrl}">
+  <meta property="og:type" content="business.business">
+  
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${title}">
+  <meta name="twitter:description" content="${description}">
+  <meta name="twitter:image" content="${previewImage}">
+
+  <!-- Schema.org JSON-LD Structured Data -->
+  <script type="application/ld+json">
+${JSON.stringify(businessSchema, null, 2)}
+  </script>
+  <script type="application/ld+json">
+${JSON.stringify(breadcrumbSchema, null, 2)}
+  </script>
+  <script type="application/ld+json">
+${JSON.stringify(faqSchema, null, 2)}
+  </script>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 860px; margin: 0 auto; padding: 24px; color: #1e293b; line-height: 1.6;">
+  <nav style="font-size: 0.875rem; color: #64748b; margin-bottom: 20px;">
+    <a href="${frontendUrl}" style="color: #e11d48; text-decoration: none;">Accueil</a> &gt; 
+    <a href="${cityUrl}" style="color: #e11d48; text-decoration: none;">${city || 'Salons'}</a> &gt; 
+    <span>${salonName}</span>
+  </nav>
+
+  <header style="margin-bottom: 28px; border-bottom: 2px solid #fecdd3; padding-bottom: 20px;">
+    <h1 style="font-size: 2.2rem; margin: 0 0 10px 0; color: #0f172a;">${salonName}</h1>
+    <p style="font-size: 1.1rem; color: #64748b; margin: 0 0 12px 0;">${humanCategory}${titleCity}</p>
+    <div style="background: #fff1f2; border-left: 4px solid #e11d48; padding: 12px 16px; border-radius: 4px; margin-bottom: 16px;">
+      <p style="margin: 0; font-size: 0.95rem;"><strong>📍 Adresse:</strong> ${address || 'Adresse disponible sur réservation'} ${city ? ' — ' + city : ''}</p>
+      ${salon.phone ? `<p style="margin: 4px 0 0 0; font-size: 0.95rem;"><strong>📞 Téléphone:</strong> ${salon.phone}</p>` : ''}
+      ${salon.rating && salon.rating > 0 ? `<p style="margin: 4px 0 0 0; font-size: 0.95rem;"><strong>⭐ Note clients:</strong> ${salon.rating} / 5 (${salon.reviewCount || 1} avis)</p>` : ''}
+      <p style="margin: 4px 0 0 0; font-size: 0.95rem;"><strong>💳 Tarifs:</strong> ${priceRange}</p>
+    </div>
+    <p style="font-size: 1rem; color: #334155;">${description}</p>
+    <p style="margin-top: 16px;">
+      <a href="${canonicalUrl}/book" style="background: linear-gradient(135deg, #e11d48, #be123c); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; box-shadow: 0 4px 14px rgba(225, 29, 72, 0.3);">
+        📅 Réserver un rendez-vous chez ${salonName}
+      </a>
+    </p>
+  </header>
+
+  <main>
+    <section style="margin-bottom: 32px;">
+      <h2 style="font-size: 1.5rem; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Prestations et Tarifs</h2>
+      <ul style="list-style: none; padding: 0;">
+        ${prestationsHtml || '<li>Prestations et tarifs complets disponibles sur réservation en ligne.</li>'}
+      </ul>
+    </section>
+
+    ${salon.horaires ? `
+    <section style="margin-bottom: 32px;">
+      <h2 style="font-size: 1.5rem; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Horaires d'ouverture</h2>
+      <p style="background: #f8fafc; padding: 14px; border-radius: 6px;">${salon.horaires}</p>
+    </section>` : ''}
+
+    <section style="margin-bottom: 32px;">
+      <h2 style="font-size: 1.5rem; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Questions Fréquentes (FAQ)</h2>
+      <div style="margin-bottom: 16px;">
+        <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 4px;">Comment réserver chez ${salonName} ?</h3>
+        <p style="color: #475569; font-size: 0.95rem; margin: 0;">Sélectionnez vos soins et réservez gratuitement votre créneau en ligne 24h/7j sur BeautyFlow Africa sans attente téléphonique.</p>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 4px;">Quels sont les moyens de paiement acceptés ?</h3>
+        <p style="color: #475569; font-size: 0.95rem; margin: 0;">Vous pouvez régler sur place ou via Mobile Money (Orange Money, MTN MoMo, Wave) ou carte bancaire.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 0.85rem; color: #94a3b8; text-align: center;">
+    <p>© ${new Date().getFullYear()} BeautyFlow Africa — La plateforme numéro 1 de prise de rendez-vous beauté en Afrique.</p>
+  </footer>
+
+  <script>
+    if (!navigator.userAgent.match(/(bot|googlebot|crawler|spider|slurp|bingbot|facebookexternalhit|whatsapp|twitterbot)/i)) {
+      window.location.href = "${canonicalUrl}";
+    }
+  </script>
+</body>
+</html>`);
+  } catch (error) {
+    console.error('Error generating salon share preview:', error);
+    res.status(500).send('Server Error');
+  }
+};
+
+// GET /api/marketplace/salons/city-preview/:city or /:category/:city
+exports.getCitySharePreview = async (req, res) => {
+  try {
+    const rawCity = req.params.city || '';
+    const rawCategory = req.params.category || '';
+    const city = rawCity.replace(/-/g, ' ').trim();
+    const formattedCity = city ? city.charAt(0).toUpperCase() + city.slice(1).toLowerCase() : 'Afrique';
+
+    const categoryLower = rawCategory.toLowerCase();
+    let categoryTitle = 'Salons de Beauté et Coiffure';
+    let humanCategory = 'salons de beauté et coiffure';
+    let typeQueryFilter = {};
+
+    if (categoryLower.includes('coiff') || categoryLower.includes('hair')) {
+      categoryTitle = 'Coiffeurs et Salons de Coiffure';
+      humanCategory = 'coiffeurs et salons de coiffure';
+      typeQueryFilter = { typeEtablissement: { $in: ['salon_coiffure', 'mixte', 'autre'] } };
+    } else if (categoryLower.includes('barber') || categoryLower.includes('barbier')) {
+      categoryTitle = 'Barber Shops et Barbiers';
+      humanCategory = 'barber shops et barbiers pour hommes';
+      typeQueryFilter = { typeEtablissement: 'barbershop' };
+    } else if (categoryLower.includes('soin') || categoryLower.includes('institut') || categoryLower.includes('spa')) {
+      categoryTitle = 'Instituts de Beauté et Spas';
+      humanCategory = 'instituts de beauté, soins et spas';
+      typeQueryFilter = { typeEtablissement: { $in: ['institut_beaute', 'spa', 'onglerie'] } };
+    }
+
+    const cityRegex = new RegExp(city, 'i');
+    const query = {
+      isActive: true,
+      isHidden: { $ne: true },
+      hidden: { $ne: true },
+      ...(city ? { ville: cityRegex } : {}),
+      ...typeQueryFilter
+    };
+
+    const salons = await Salon.find(query)
+      .select('name nom slug address ville pays rating reviewCount logoUrl bannerUrl galleryUrls typeEtablissement description horaires devise')
+      .limit(50)
+      .lean();
+
+    const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+    const canonicalPath = rawCategory ? `/${rawCategory}/${rawCity}` : `/salons/${rawCity || 'tous'}`;
+    const canonicalUrl = `${frontendUrl}${canonicalPath}`;
+
+    const title = `${categoryTitle} à ${formattedCity} (2026) : Avis, Tarifs & Réservation 24/7 | BeautyFlow Africa`;
+    const description = `Trouvez les meilleurs ${humanCategory} à ${formattedCity}. Comparez les avis vérifiés, tarifs, photos, horaires et réservez instantanément votre rendez-vous en ligne sur BeautyFlow Africa.`;
+    const previewImage = `${frontendUrl}/beautyflow-banner.png`;
+
+    // Schema.org ItemList
+    const itemListSchema = {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      "name": `${categoryTitle} à ${formattedCity}`,
+      "description": description,
+      "url": canonicalUrl,
+      "numberOfItems": salons.length,
+      "itemListElement": salons.map((s, idx) => {
+        const sName = s.name || s.nom || 'Salon';
+        const sUrl = `${frontendUrl}/salon/${s.slug}`;
+        const sType = s.typeEtablissement === 'barbershop' ? 'Barbershop' : (s.typeEtablissement === 'institut_beaute' ? 'BeautySalon' : 'HairSalon');
+        return {
+          "@type": "ListItem",
+          "position": idx + 1,
+          "item": {
+            "@type": sType,
+            "@id": sUrl,
+            "name": sName,
+            "url": sUrl,
+            "description": s.description || `${sName}, votre salon de beauté à ${s.ville || formattedCity}.`,
+            "telephone": s.phone || undefined,
+            "address": {
+              "@type": "PostalAddress",
+              "streetAddress": s.address || undefined,
+              "addressLocality": s.ville || formattedCity,
+              "addressCountry": s.pays || "CM"
+            },
+            ...(s.rating && s.rating > 0 ? {
+              "aggregateRating": {
+                "@type": "AggregateRating",
+                "ratingValue": s.rating,
+                "reviewCount": s.reviewCount || 1,
+                "bestRating": "5",
+                "worstRating": "1"
+              }
+            } : {})
+          }
+        };
+      })
+    };
+
+    // Breadcrumbs
+    const breadcrumbSchema = {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Accueil",
+          "item": frontendUrl
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": `Salons ${formattedCity}`,
+          "item": canonicalUrl
+        }
+      ]
+    };
+
+    // FAQ Schema
+    const faqSchema = {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": `Quels sont les meilleurs salons de coiffure et beauté à ${formattedCity} ?`,
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": `Parmi les établissements les plus réputés à ${formattedCity} sur BeautyFlow Africa : ${salons.slice(0, 5).map(s => s.name || s.nom).join(', ') || 'découvrez notre sélection vérifiée'}. Tous offrent la prise de rendez-vous en ligne avec avis clients certifiés.`
+          }
+        },
+        {
+          "@type": "Question",
+          "name": `Comment réserver un coiffeur ou un institut de beauté à ${formattedCity} ?`,
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": `Sur BeautyFlow Africa, choisissez votre salon à ${formattedCity}, sélectionnez vos prestations (coupe, tresses, coloration, soin du visage, manucure) et réservez votre créneau 24h/24 sans avoir besoin d'appeler.`
+          }
+        },
+        {
+          "@type": "Question",
+          "name": `Combien coûte une coupe de cheveux ou un soin à ${formattedCity} ?`,
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": `Les prix varient selon le type d'établissement et de prestation, généralement entre 2 000 FCFA et 40 000 FCFA. Les tarifs de chaque salon sont transparents et affichés sur leur fiche BeautyFlow.`
+          }
+        }
+      ]
+    };
+
+    const salonsCardsHtml = salons.map(s => {
+      const sName = s.name || s.nom || 'Salon';
+      const sUrl = `${frontendUrl}/salon/${s.slug}`;
+      const sImg = s.bannerUrl || (s.galleryUrls && s.galleryUrls[0]) || s.logoUrl || `${frontendUrl}/beautyflow-banner.png`;
+      return `
+      <article style="border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 20px; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+        <h2 style="font-size: 1.35rem; margin: 0 0 6px 0;">
+          <a href="${sUrl}" style="color: #0f172a; text-decoration: none;">${sName}</a>
+        </h2>
+        <p style="color: #e11d48; font-weight: 600; font-size: 0.9rem; margin: 0 0 8px 0;">
+          ${s.typeEtablissement ? s.typeEtablissement.replace('_', ' ').toUpperCase() : 'SALON DE BEAUTÉ'}
+        </p>
+        <p style="color: #475569; font-size: 0.95rem; margin: 0 0 8px 0;">
+          📍 <strong>Adresse:</strong> ${s.address || 'Adresse communiquée à la réservation'} (${s.ville || formattedCity})
+        </p>
+        ${s.rating && s.rating > 0 ? `<p style="color: #b45309; font-size: 0.95rem; margin: 0 0 8px 0;">⭐ <strong>${s.rating} / 5</strong> (${s.reviewCount || 1} avis clients)</p>` : ''}
+        ${s.description ? `<p style="color: #64748b; font-size: 0.9rem; margin: 0 0 14px 0;">${s.description.slice(0, 160)}...</p>` : ''}
+        <div>
+          <a href="${sUrl}" style="background: #e11d48; color: white; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-size: 0.9rem; font-weight: bold; display: inline-block;">
+            Voir les prestations & Réserver
+          </a>
+        </div>
+      </article>
+      `;
+    }).join('');
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <meta name="description" content="${description}">
+  <link rel="canonical" href="${canonicalUrl}">
+  
+  <!-- Open Graph -->
+  <meta property="og:site_name" content="BeautyFlow Africa">
   <meta property="og:title" content="${title}">
   <meta property="og:description" content="${description}">
   <meta property="og:image" content="${previewImage}">
@@ -905,32 +1301,76 @@ exports.getSalonSharePreview = async (req, res) => {
 
   <!-- Schema.org JSON-LD -->
   <script type="application/ld+json">
-${JSON.stringify(schemaData, null, 2)}
+${JSON.stringify(itemListSchema, null, 2)}
+  </script>
+  <script type="application/ld+json">
+${JSON.stringify(breadcrumbSchema, null, 2)}
+  </script>
+  <script type="application/ld+json">
+${JSON.stringify(faqSchema, null, 2)}
   </script>
 </head>
-<body style="font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6;">
-  <header>
-    <h1>${salonName}</h1>
-    <p><strong>Ville:</strong> ${city} | <strong>Adresse:</strong> ${address}</p>
-    <p>${description}</p>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; color: #1e293b; line-height: 1.6; background-color: #f8fafc;">
+  <nav style="font-size: 0.875rem; color: #64748b; margin-bottom: 20px;">
+    <a href="${frontendUrl}" style="color: #e11d48; text-decoration: none;">Accueil</a> &gt; 
+    <span>${categoryTitle} à ${formattedCity}</span>
+  </nav>
+
+  <header style="margin-bottom: 30px; background: #ffffff; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
+    <h1 style="font-size: 2.1rem; margin: 0 0 12px 0; color: #0f172a;">
+      ${categoryTitle} à <span style="color: #e11d48;">${formattedCity}</span>
+    </h1>
+    <p style="font-size: 1.05rem; color: #475569; margin: 0 0 16px 0;">
+      Découvrez le guide complet des meilleurs ${humanCategory} à ${formattedCity}. Réservez votre coiffure, coupe homme, soins esthétiques, manucure ou massage 24h/24 et 7j/7 avec confirmation instantanée.
+    </p>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+      <a href="${frontendUrl}/salons/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Tous les salons</a>
+      <a href="${frontendUrl}/coiffeurs/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Coiffeurs</a>
+      <a href="${frontendUrl}/barbiers/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Barbers</a>
+      <a href="${frontendUrl}/instituts-de-beaute/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Instituts & Spas</a>
+    </div>
   </header>
+
   <main>
-    <h2>Services et Prestations</h2>
-    <ul>
-      ${prestationsHtml || '<li>Prestations disponibles sur réservation en ligne.</li>'}
-    </ul>
-    ${salon.horaires ? `<h2>Horaires d'ouverture</h2><p>${salon.horaires}</p>` : ''}
-    <p><a href="${canonicalUrl}" style="background-color: #ec4899; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block;">Réserver un rendez-vous sur BeautyFlow</a></p>
+    <section style="margin-bottom: 40px;">
+      <h2 style="font-size: 1.5rem; color: #0f172a; margin-bottom: 20px;">
+        ${salons.length} établissements recommandés à ${formattedCity}
+      </h2>
+      ${salonsCardsHtml || `<p style="background: white; padding: 20px; border-radius: 8px;">Aucun salon listé actuellement dans cette zone. Vous êtes professionnel de la beauté à ${formattedCity} ? <a href="${frontendUrl}/pro" style="color: #e11d48; font-weight: bold;">Inscrivez votre salon sur BeautyFlow</a>.</p>`}
+    </section>
+
+    <section style="margin-bottom: 40px; background: white; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
+      <h2 style="font-size: 1.5rem; color: #0f172a; margin-bottom: 16px;">Questions Fréquentes sur la beauté à ${formattedCity}</h2>
+      <div style="margin-bottom: 18px;">
+        <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 4px;">Comment trouver le meilleur coiffeur ou salon à ${formattedCity} ?</h3>
+        <p style="color: #475569; font-size: 0.95rem; margin: 0;">Consultez les notes et avis certifiés de clients réels sur BeautyFlow Africa. Filtrez par spécialité (tresses, locks, coloration, lissage, barbe, soins) et réservez directement le professionnel le mieux noté.</p>
+      </div>
+      <div style="margin-bottom: 18px;">
+        <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 4px;">Pourquoi réserver son salon en ligne sur BeautyFlow Africa ?</h3>
+        <p style="color: #475569; font-size: 0.95rem; margin: 0;">BeautyFlow vous évite les longues files d'attente au salon, vous garantit votre créneau avec un rappel automatique par SMS/WhatsApp, et vous permet de comparer les prix en toute transparence.</p>
+      </div>
+    </section>
+
+    <section style="margin-bottom: 30px; background: #fff1f2; padding: 20px; border-radius: 12px; border: 1px solid #fecdd3;">
+      <h3 style="font-size: 1.2rem; color: #9f1239; margin: 0 0 8px 0;">Vous êtes propriétaire d'un salon de coiffure ou institut à ${formattedCity} ?</h3>
+      <p style="color: #4c0519; font-size: 0.95rem; margin: 0 0 14px 0;">Attirez de nouveaux clients chaque jour et simplifiez la gestion de vos rendez-vous, paiements et fidélité.</p>
+      <a href="${frontendUrl}/pro" style="background: #e11d48; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;">Rejoindre BeautyFlow Pro</a>
+    </section>
   </main>
+
+  <footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 0.85rem; color: #94a3b8; text-align: center;">
+    <p>© ${new Date().getFullYear()} BeautyFlow Africa — Le réseau beauté n°1 en Afrique (Cameroun, Côte d'Ivoire, Sénégal, Gabon, RDC...).</p>
+  </footer>
+
   <script>
-    if (!navigator.userAgent.match(/(bot|googlebot|crawler|spider|slurp|bingbot)/i)) {
+    if (!navigator.userAgent.match(/(bot|googlebot|crawler|spider|slurp|bingbot|facebookexternalhit|whatsapp|twitterbot)/i)) {
       window.location.href = "${canonicalUrl}";
     }
   </script>
 </body>
 </html>`);
   } catch (error) {
-    console.error('Error generating share preview:', error);
+    console.error('Error generating city share preview:', error);
     res.status(500).send('Server Error');
   }
 };
@@ -939,9 +1379,11 @@ ${JSON.stringify(schemaData, null, 2)}
 exports.generateSitemapXml = async (req, res) => {
   try {
     const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+    const baseUrl = (process.env.BACKEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
 
     const salons = await Salon.find({ isActive: true, isHidden: { $ne: true }, hidden: { $ne: true } })
-      .select('slug ville typeEtablissement updatedAt');
+      .select('name nom slug ville typeEtablissement bannerUrl galleryUrls logoUrl updatedAt')
+      .lean();
 
     const citiesSet = new Set();
     salons.forEach(s => {
@@ -954,7 +1396,8 @@ exports.generateSitemapXml = async (req, res) => {
     const nowIso = new Date().toISOString();
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"\n`;
+    xml += `        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n`;
 
     const staticPages = [
       { url: '/', priority: '1.0', changefreq: 'daily' },
@@ -977,38 +1420,52 @@ exports.generateSitemapXml = async (req, res) => {
       xml += `    <loc>${frontendUrl}/salons/${citySlug}</loc>\n`;
       xml += `    <lastmod>${nowIso}</lastmod>\n`;
       xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>0.8</priority>\n`;
+      xml += `    <priority>0.85</priority>\n`;
       xml += `  </url>\n`;
 
       xml += `  <url>\n`;
       xml += `    <loc>${frontendUrl}/coiffeurs/${citySlug}</loc>\n`;
       xml += `    <lastmod>${nowIso}</lastmod>\n`;
       xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>0.7</priority>\n`;
+      xml += `    <priority>0.80</priority>\n`;
       xml += `  </url>\n`;
 
       xml += `  <url>\n`;
       xml += `    <loc>${frontendUrl}/barbiers/${citySlug}</loc>\n`;
       xml += `    <lastmod>${nowIso}</lastmod>\n`;
       xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>0.7</priority>\n`;
+      xml += `    <priority>0.80</priority>\n`;
       xml += `  </url>\n`;
 
       xml += `  <url>\n`;
       xml += `    <loc>${frontendUrl}/instituts-de-beaute/${citySlug}</loc>\n`;
       xml += `    <lastmod>${nowIso}</lastmod>\n`;
       xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>0.7</priority>\n`;
+      xml += `    <priority>0.80</priority>\n`;
       xml += `  </url>\n`;
     });
 
     salons.forEach(s => {
       if (s.slug) {
+        const sName = s.name || s.nom || 'Salon de beauté';
+        let imageUrl = s.bannerUrl || (s.galleryUrls && s.galleryUrls[0]) || s.logoUrl || '';
+        if (imageUrl && !imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+          const cleanPath = imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`;
+          imageUrl = `${baseUrl}${cleanPath}`;
+        }
+
         xml += `  <url>\n`;
         xml += `    <loc>${frontendUrl}/salon/${s.slug}</loc>\n`;
         xml += `    <lastmod>${s.updatedAt ? new Date(s.updatedAt).toISOString() : nowIso}</lastmod>\n`;
         xml += `    <changefreq>weekly</changefreq>\n`;
         xml += `    <priority>0.9</priority>\n`;
+        if (imageUrl) {
+          xml += `    <image:image>\n`;
+          xml += `      <image:loc>${imageUrl}</image:loc>\n`;
+          xml += `      <image:title><![CDATA[${sName} - ${s.ville || 'BeautyFlow Africa'}]]></image:title>\n`;
+          xml += `      <image:caption><![CDATA[Réservation en ligne chez ${sName} à ${s.ville || 'Afrique'} sur BeautyFlow]]></image:caption>\n`;
+          xml += `    </image:image>\n`;
+        }
         xml += `  </url>\n`;
       }
     });
@@ -1021,33 +1478,6 @@ exports.generateSitemapXml = async (req, res) => {
     console.error('Error generating sitemap XML:', error);
     res.status(500).send('Server Error');
   }
-};
-
-// GET /robots.txt
-exports.getRobotsTxt = async (req, res) => {
-  const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
-  const robots = `User-agent: *
-Allow: /
-Allow: /salon/
-Allow: /salons/
-Allow: /coiffeurs/
-Allow: /barbiers/
-Allow: /instituts-de-beaute/
-Allow: /booking/
-Allow: /explorer
-
-Disallow: /pro/onboarding
-Disallow: /explorer/account
-Disallow: /admin/
-Disallow: /dashboard/
-Disallow: /api/
-
-Sitemap: ${frontendUrl}/sitemap.xml
-`;
-
-  res.setHeader('Content-Type', 'text/plain');
-  res.status(200).send(robots);
-};
 
 // GET /api/marketplace/bookings/count
 exports.getBookingsCount = async (req, res, next) => {
