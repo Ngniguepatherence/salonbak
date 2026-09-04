@@ -406,16 +406,16 @@ exports.getSalonBySlug = async (req, res) => {
       availability: member.availability || null
     }));
 
-    res.status(200).json({ 
-      success: true, 
-      data: { 
-        ...salon.toObject(), 
+    res.status(200).json({
+      success: true,
+      data: {
+        ...salon.toObject(),
         slug: effectiveSlug,
-        prestations, 
+        prestations,
         staff,
         isCanonical,
         redirectUrl
-      } 
+      }
     });
   } catch (error) {
     sendErrorResponse(res, error);
@@ -757,8 +757,8 @@ exports.getSalonSharePreview = async (req, res) => {
     const slug = req.params.slug;
     const isObjectId = slug.match(/^[0-9a-fA-F]{24}$/);
 
-    const query = isObjectId 
-      ? { $or: [{ _id: slug }, { slug: slug }, { oldSlugs: slug }] } 
+    const query = isObjectId
+      ? { $or: [{ _id: slug }, { slug: slug }, { oldSlugs: slug }] }
       : { $or: [{ slug: slug }, { oldSlugs: slug }] };
 
     const salon = await Salon.findOne(query);
@@ -789,14 +789,14 @@ exports.getSalonSharePreview = async (req, res) => {
     const description = salon.description || defaultDesc;
 
     // Extract best salon image
-    let rawImage = salon.branding?.bannerUrl || 
-      salon.bannerUrl || 
-      (salon.galleryUrls && salon.galleryUrls[0]) || 
-      (salon.branding?.gallery && salon.branding.gallery[0]) || 
-      (salon.photos && salon.photos[0]) || 
-      salon.branding?.logoUrl || 
-      salon.logoUrl || 
-      salon.logo || 
+    let rawImage = salon.branding?.bannerUrl ||
+      salon.bannerUrl ||
+      (salon.galleryUrls && salon.galleryUrls[0]) ||
+      (salon.branding?.gallery && salon.branding.gallery[0]) ||
+      (salon.photos && salon.photos[0]) ||
+      salon.branding?.logoUrl ||
+      salon.logoUrl ||
+      salon.logo ||
       '';
 
     const baseUrl = (process.env.BACKEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
@@ -992,7 +992,7 @@ exports.getSalonSharePreview = async (req, res) => {
     };
 
     // Prestations HTML list
-    const prestationsHtml = prestations.map(p => 
+    const prestationsHtml = prestations.map(p =>
       `<li style="margin-bottom: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
         <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 1.05rem;">
           <span>${p.nom || p.name}</span>
@@ -1479,260 +1479,260 @@ exports.generateSitemapXml = async (req, res) => {
     res.status(500).send('Server Error');
   }
 
-// GET /api/marketplace/bookings/count
-exports.getBookingsCount = async (req, res, next) => {
-  try {
-    const count = await Rendezvous.countDocuments({});
-    res.status(200).json({ success: true, count });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// GET /api/marketplace/bookings
-exports.getClientBookings = async (req, res, next) => {
-  try {
-    if (!req.appUser) {
-      return res.status(200).json({ success: true, data: [] });
+  // GET /api/marketplace/bookings/count
+  exports.getBookingsCount = async (req, res, next) => {
+    try {
+      const count = await Rendezvous.countDocuments({});
+      res.status(200).json({ success: true, count });
+    } catch (err) {
+      next(err);
     }
+  };
 
-    const cleanPhoneDigits = req.appUser.telephone ? req.appUser.telephone.replace(/\D/g, '').slice(-9) : '';
-
-    const queryConditions = [{ appUser: req.appUser._id }];
-    if (cleanPhoneDigits && cleanPhoneDigits.length >= 8) {
-      queryConditions.push({ telephone: { $regex: cleanPhoneDigits + '$' } });
-    }
-
-    const clients = await Client.find({ $or: queryConditions });
-    const clientIds = clients.map(c => c._id);
-
-    const bookings = await Rendezvous.find({ client: { $in: clientIds } })
-      .populate('salon', 'name nom slug logoUrl address ville branding')
-      .populate('prestations', 'nom prix description duree')
-      .populate('typePrestation', 'nom prix description duree')
-      .populate('employe', 'nom telephone avatarUrl')
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({ success: true, data: bookings });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// GET /api/marketplace/auth/loyalty
-exports.getClientLoyalty = async (req, res, next) => {
-  try {
-    if (!req.appUser) {
-      return res.status(200).json({ success: true, data: [] });
-    }
-
-    const cleanPhoneDigits = req.appUser.telephone ? req.appUser.telephone.replace(/\D/g, '').slice(-9) : '';
-
-    const queryConditions = [{ appUser: req.appUser._id }];
-    if (cleanPhoneDigits && cleanPhoneDigits.length >= 8) {
-      queryConditions.push({ telephone: { $regex: cleanPhoneDigits + '$' } });
-    }
-
-    const clients = await Client.find({
-      $or: queryConditions,
-      $and: [
-        {
-          $or: [
-            { pointsFidelite: { $gt: 0 } },
-            { nombreVisites: { $gt: 0 } }
-          ]
-        }
-      ]
-    })
-      .populate('salon', 'name nom slug logoUrl bannerUrl configFidelite branding')
-      .lean();
-
-    res.status(200).json({ success: true, data: clients });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// POST /api/marketplace/bookings/:id/confirm-completion
-exports.confirmBookingCompletion = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-
-    if (!req.appUser) {
-      return res.status(401).json({ success: false, message: 'Non autorisé' });
-    }
-
-    const cleanPhoneDigits = req.appUser.telephone ? req.appUser.telephone.replace(/\D/g, '').slice(-9) : '';
-
-    const queryConditions = [{ appUser: req.appUser._id }];
-    if (cleanPhoneDigits && cleanPhoneDigits.length >= 8) {
-      queryConditions.push({ telephone: { $regex: cleanPhoneDigits + '$' } });
-    }
-
-    const clients = await Client.find({ $or: queryConditions });
-    const clientIds = clients.map(c => c._id.toString());
-
-    const booking = await Rendezvous.findById(id)
-      .populate('salon')
-      .populate('typePrestation')
-      .populate('prestations');
-
-    if (!booking) {
-      return res.status(404).json({ success: false, message: 'Réservation introuvable' });
-    }
-
-    const bookingClientId = booking.client?._id ? booking.client._id.toString() : booking.client?.toString();
-    const isOwner = clientIds.includes(bookingClientId);
-    if (!isOwner) {
-      return res.status(403).json({ success: false, message: 'Cette réservation ne vous appartient pas' });
-    }
-
-    const previousStatut = booking.statut;
-
-    // Marquer la réservation comme terminée / honorée
-    booking.statut = 'completed';
-    await booking.save();
-
-    // Incrémenter les points de fidélité et le nombre de visites sur le modèle Client
-    if (booking.client && previousStatut !== 'completed') {
-      const clientObj = await Client.findById(booking.client._id || booking.client).populate('salon');
-      if (clientObj) {
-        const configFidelite = clientObj.salon?.configFidelite || { visitesRequises: 10, visitesVIP: 20 };
-        const price = (booking.prestations || []).reduce((sum, p) => sum + (parseInt((p.prix || '').toString().replace(/\D/g, ''), 10) || 0), 0) || 0;
-        if (typeof clientObj.enregistrerVisite === 'function') {
-          clientObj.enregistrerVisite(price, configFidelite);
-        } else {
-          clientObj.pointsFidelite = (clientObj.pointsFidelite || 0) + 1;
-          clientObj.nombreVisites = (clientObj.nombreVisites || 0) + 1;
-          clientObj.totalDepense = (clientObj.totalDepense || 0) + price;
-          clientObj.derniereVisite = new Date();
-        }
-        if (req.appUser && !clientObj.appUser) {
-          clientObj.appUser = req.appUser._id;
-        }
-        await clientObj.save();
+  // GET /api/marketplace/bookings
+  exports.getClientBookings = async (req, res, next) => {
+    try {
+      if (!req.appUser) {
+        return res.status(200).json({ success: true, data: [] });
       }
-    }
 
-    // Déclencher le reversement Payout au salon uniquement si le paiement avait été effectué en ligne
-    if (previousStatut === 'paid') {
-      const paymentService = require('../services/payment.service');
-      try {
-        await paymentService.executeBookingPayout(booking);
-      } catch (payoutErr) {
-        console.error('[MARKETPLACE CONTROLLER] Erreur lors du payout:', payoutErr.message);
+      const cleanPhoneDigits = req.appUser.telephone ? req.appUser.telephone.replace(/\D/g, '').slice(-9) : '';
+
+      const queryConditions = [{ appUser: req.appUser._id }];
+      if (cleanPhoneDigits && cleanPhoneDigits.length >= 8) {
+        queryConditions.push({ telephone: { $regex: cleanPhoneDigits + '$' } });
       }
+
+      const clients = await Client.find({ $or: queryConditions });
+      const clientIds = clients.map(c => c._id);
+
+      const bookings = await Rendezvous.find({ client: { $in: clientIds } })
+        .populate('salon', 'name nom slug logoUrl address ville branding')
+        .populate('prestations', 'nom prix description duree')
+        .populate('typePrestation', 'nom prix description duree')
+        .populate('employe', 'nom telephone avatarUrl')
+        .sort({ createdAt: -1 });
+
+      res.status(200).json({ success: true, data: bookings });
+    } catch (err) {
+      next(err);
     }
+  };
 
-    res.status(200).json({
-      success: true,
-      message: 'Prestation confirmée avec succès.',
-      data: booking
-    });
-  } catch (err) {
-    next(err);
-  }
-};
+  // GET /api/marketplace/auth/loyalty
+  exports.getClientLoyalty = async (req, res, next) => {
+    try {
+      if (!req.appUser) {
+        return res.status(200).json({ success: true, data: [] });
+      }
 
-// POST /api/marketplace/salons/:slug/track
-exports.trackSalonEvent = async (req, res, next) => {
-  try {
-    const { slug } = req.params;
-    const { eventType, customerName, customerPhone, customerEmail, selectedServices } = req.body;
+      const cleanPhoneDigits = req.appUser.telephone ? req.appUser.telephone.replace(/\D/g, '').slice(-9) : '';
 
-    const isObjectId = slug.match(/^[0-9a-fA-F]{24}$/);
-    const query = isObjectId ? { _id: slug } : { slug };
+      const queryConditions = [{ appUser: req.appUser._id }];
+      if (cleanPhoneDigits && cleanPhoneDigits.length >= 8) {
+        queryConditions.push({ telephone: { $regex: cleanPhoneDigits + '$' } });
+      }
 
-    const salon = await Salon.findOne(query);
-    if (!salon) {
-      return res.status(404).json({ success: false, message: 'Salon introuvable' });
+      const clients = await Client.find({
+        $or: queryConditions,
+        $and: [
+          {
+            $or: [
+              { pointsFidelite: { $gt: 0 } },
+              { nombreVisites: { $gt: 0 } }
+            ]
+          }
+        ]
+      })
+        .populate('salon', 'name nom slug logoUrl bannerUrl configFidelite branding')
+        .lean();
+
+      res.status(200).json({ success: true, data: clients });
+    } catch (err) {
+      next(err);
     }
+  };
 
-    const appUserId = req.appUser ? req.appUser._id : null;
-    const resolvedName = customerName || (req.appUser ? req.appUser.nom : 'Visiteur Anonyme');
-    const resolvedPhone = customerPhone || (req.appUser ? req.appUser.telephone : '');
-    const resolvedEmail = customerEmail || (req.appUser ? req.appUser.email : '');
+  // POST /api/marketplace/bookings/:id/confirm-completion
+  exports.confirmBookingCompletion = async (req, res, next) => {
+    try {
+      const { id } = req.params;
 
-    const event = await SalonAnalyticsEvent.create({
-      salon: salon._id,
-      eventType: eventType || 'view_page',
-      customerName: resolvedName,
-      customerPhone: resolvedPhone,
-      customerEmail: resolvedEmail,
-      selectedServices: selectedServices || [],
-      appUser: appUserId,
-      userAgent: req.headers['user-agent'] || '',
-      ip: req.ip || ''
-    });
+      if (!req.appUser) {
+        return res.status(401).json({ success: false, message: 'Non autorisé' });
+      }
 
-    res.status(201).json({ success: true, data: event });
-  } catch (err) {
-    next(err);
-  }
-};
+      const cleanPhoneDigits = req.appUser.telephone ? req.appUser.telephone.replace(/\D/g, '').slice(-9) : '';
 
-// GET /api/marketplace/salons/:id/analytics (or /api/salons/:id/analytics)
-exports.getSalonAnalytics = async (req, res, next) => {
-  try {
-    const userSalonId = req.user?.salon?._id?.toString() || req.user?.salon?.toString();
-    const rawId = req.params.id || req.params.salonId || req.params.slug || req.query.salonId || (req.salon ? req.salon._id : null) || userSalonId;
-    if (!rawId) {
-      return res.status(400).json({ success: false, message: 'ID de salon requis' });
-    }
+      const queryConditions = [{ appUser: req.appUser._id }];
+      if (cleanPhoneDigits && cleanPhoneDigits.length >= 8) {
+        queryConditions.push({ telephone: { $regex: cleanPhoneDigits + '$' } });
+      }
 
-    const isObjectId = String(rawId).match(/^[0-9a-fA-F]{24}$/);
-    const query = isObjectId ? { _id: rawId } : { slug: rawId };
+      const clients = await Client.find({ $or: queryConditions });
+      const clientIds = clients.map(c => c._id.toString());
 
-    const salon = await Salon.findOne(query);
-    if (!salon) {
-      return res.status(404).json({ success: false, message: 'Salon introuvable' });
-    }
+      const booking = await Rendezvous.findById(id)
+        .populate('salon')
+        .populate('typePrestation')
+        .populate('prestations');
 
-    const rawEvents = await SalonAnalyticsEvent.find({ salon: salon._id })
-      .populate('appUser', 'nom telephone email avatarUrl')
-      .sort({ createdAt: -1 })
-      .limit(500);
+      if (!booking) {
+        return res.status(404).json({ success: false, message: 'Réservation introuvable' });
+      }
 
-    const events = rawEvents.map(ev => {
-      const obj = ev.toObject();
-      if (obj.appUser) {
-        if (!obj.customerName || obj.customerName === 'Visiteur Anonyme') {
-          obj.customerName = obj.appUser.nom || 'Visiteur Connecté';
-        }
-        if (!obj.customerPhone) {
-          obj.customerPhone = obj.appUser.telephone || '';
-        }
-        if (!obj.customerEmail) {
-          obj.customerEmail = obj.appUser.email || '';
+      const bookingClientId = booking.client?._id ? booking.client._id.toString() : booking.client?.toString();
+      const isOwner = clientIds.includes(bookingClientId);
+      if (!isOwner) {
+        return res.status(403).json({ success: false, message: 'Cette réservation ne vous appartient pas' });
+      }
+
+      const previousStatut = booking.statut;
+
+      // Marquer la réservation comme terminée / honorée
+      booking.statut = 'completed';
+      await booking.save();
+
+      // Incrémenter les points de fidélité et le nombre de visites sur le modèle Client
+      if (booking.client && previousStatut !== 'completed') {
+        const clientObj = await Client.findById(booking.client._id || booking.client).populate('salon');
+        if (clientObj) {
+          const configFidelite = clientObj.salon?.configFidelite || { visitesRequises: 10, visitesVIP: 20 };
+          const price = (booking.prestations || []).reduce((sum, p) => sum + (parseInt((p.prix || '').toString().replace(/\D/g, ''), 10) || 0), 0) || 0;
+          if (typeof clientObj.enregistrerVisite === 'function') {
+            clientObj.enregistrerVisite(price, configFidelite);
+          } else {
+            clientObj.pointsFidelite = (clientObj.pointsFidelite || 0) + 1;
+            clientObj.nombreVisites = (clientObj.nombreVisites || 0) + 1;
+            clientObj.totalDepense = (clientObj.totalDepense || 0) + price;
+            clientObj.derniereVisite = new Date();
+          }
+          if (req.appUser && !clientObj.appUser) {
+            clientObj.appUser = req.appUser._id;
+          }
+          await clientObj.save();
         }
       }
-      return obj;
-    });
 
-    const totalViews = await SalonAnalyticsEvent.countDocuments({ salon: salon._id, eventType: 'view_page' });
-    const totalBookingStarts = await SalonAnalyticsEvent.countDocuments({ salon: salon._id, eventType: 'booking_started' });
-    const totalConfirmedBookings = await Rendezvous.countDocuments({ salon: salon._id, statut: { $ne: 'annule' } });
+      // Déclencher le reversement Payout au salon uniquement si le paiement avait été effectué en ligne
+      if (previousStatut === 'paid') {
+        const paymentService = require('../services/payment.service');
+        try {
+          await paymentService.executeBookingPayout(booking);
+        } catch (payoutErr) {
+          console.error('[MARKETPLACE CONTROLLER] Erreur lors du payout:', payoutErr.message);
+        }
+      }
 
-    const conversionRate = totalViews > 0 ? ((totalConfirmedBookings / totalViews) * 100).toFixed(1) : '0';
+      res.status(200).json({
+        success: true,
+        message: 'Prestation confirmée avec succès.',
+        data: booking
+      });
+    } catch (err) {
+      next(err);
+    }
+  };
 
-    const stats = {
-      totalViews,
-      totalBookingStarts,
-      totalConfirmedBookings,
-      conversionRate
-    };
+  // POST /api/marketplace/salons/:slug/track
+  exports.trackSalonEvent = async (req, res, next) => {
+    try {
+      const { slug } = req.params;
+      const { eventType, customerName, customerPhone, customerEmail, selectedServices } = req.body;
 
-    res.status(200).json({
-      success: true,
-      stats,
-      events,
-      data: {
+      const isObjectId = slug.match(/^[0-9a-fA-F]{24}$/);
+      const query = isObjectId ? { _id: slug } : { slug };
+
+      const salon = await Salon.findOne(query);
+      if (!salon) {
+        return res.status(404).json({ success: false, message: 'Salon introuvable' });
+      }
+
+      const appUserId = req.appUser ? req.appUser._id : null;
+      const resolvedName = customerName || (req.appUser ? req.appUser.nom : 'Visiteur Anonyme');
+      const resolvedPhone = customerPhone || (req.appUser ? req.appUser.telephone : '');
+      const resolvedEmail = customerEmail || (req.appUser ? req.appUser.email : '');
+
+      const event = await SalonAnalyticsEvent.create({
+        salon: salon._id,
+        eventType: eventType || 'view_page',
+        customerName: resolvedName,
+        customerPhone: resolvedPhone,
+        customerEmail: resolvedEmail,
+        selectedServices: selectedServices || [],
+        appUser: appUserId,
+        userAgent: req.headers['user-agent'] || '',
+        ip: req.ip || ''
+      });
+
+      res.status(201).json({ success: true, data: event });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  // GET /api/marketplace/salons/:id/analytics (or /api/salons/:id/analytics)
+  exports.getSalonAnalytics = async (req, res, next) => {
+    try {
+      const userSalonId = req.user?.salon?._id?.toString() || req.user?.salon?.toString();
+      const rawId = req.params.id || req.params.salonId || req.params.slug || req.query.salonId || (req.salon ? req.salon._id : null) || userSalonId;
+      if (!rawId) {
+        return res.status(400).json({ success: false, message: 'ID de salon requis' });
+      }
+
+      const isObjectId = String(rawId).match(/^[0-9a-fA-F]{24}$/);
+      const query = isObjectId ? { _id: rawId } : { slug: rawId };
+
+      const salon = await Salon.findOne(query);
+      if (!salon) {
+        return res.status(404).json({ success: false, message: 'Salon introuvable' });
+      }
+
+      const rawEvents = await SalonAnalyticsEvent.find({ salon: salon._id })
+        .populate('appUser', 'nom telephone email avatarUrl')
+        .sort({ createdAt: -1 })
+        .limit(500);
+
+      const events = rawEvents.map(ev => {
+        const obj = ev.toObject();
+        if (obj.appUser) {
+          if (!obj.customerName || obj.customerName === 'Visiteur Anonyme') {
+            obj.customerName = obj.appUser.nom || 'Visiteur Connecté';
+          }
+          if (!obj.customerPhone) {
+            obj.customerPhone = obj.appUser.telephone || '';
+          }
+          if (!obj.customerEmail) {
+            obj.customerEmail = obj.appUser.email || '';
+          }
+        }
+        return obj;
+      });
+
+      const totalViews = await SalonAnalyticsEvent.countDocuments({ salon: salon._id, eventType: 'view_page' });
+      const totalBookingStarts = await SalonAnalyticsEvent.countDocuments({ salon: salon._id, eventType: 'booking_started' });
+      const totalConfirmedBookings = await Rendezvous.countDocuments({ salon: salon._id, statut: { $ne: 'annule' } });
+
+      const conversionRate = totalViews > 0 ? ((totalConfirmedBookings / totalViews) * 100).toFixed(1) : '0';
+
+      const stats = {
+        totalViews,
+        totalBookingStarts,
+        totalConfirmedBookings,
+        conversionRate
+      };
+
+      res.status(200).json({
+        success: true,
         stats,
-        events
-      }
-    });
-  } catch (err) {
-    next(err);
+        events,
+        data: {
+          stats,
+          events
+        }
+      });
+    } catch (err) {
+      next(err);
+    }
   }
-};
-
+}
