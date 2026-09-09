@@ -320,11 +320,15 @@ exports.getSalons = async (req, res) => {
 
     // Return active and non-hidden salons matching query
     const salons = await Salon.find(query)
-      .select('name slug address ville pays devise typeEtablissement logoUrl bannerUrl galleryUrls description phone email availability horaires location isHidden hidden branding businessType freelanceSettings bookingSettings rating reviewCount isSponsored');
+      .select('name slug address ville pays devise typeEtablissement logoUrl bannerUrl galleryUrls description phone email availability horaires location isHidden hidden branding businessType freelanceSettings bookingSettings rating reviewCount isSponsored createdAt')
+      .sort({ createdAt: -1 });
 
     const data = salons.map(s => {
       const obj = s.toObject();
       if (!obj.slug) obj.slug = String(obj._id);
+      if (!obj.bannerUrl && Array.isArray(obj.galleryUrls) && obj.galleryUrls.length > 0) {
+        obj.bannerUrl = obj.galleryUrls[0];
+      }
       return obj;
     });
 
@@ -1118,19 +1122,33 @@ exports.getCitySharePreview = async (req, res) => {
     let categoryTitle = 'Salons de Beauté et Coiffure';
     let humanCategory = 'salons de beauté et coiffure';
     let typeQueryFilter = {};
+    let clientRedirectPath = `/salons/${rawCity || 'tous'}`;
 
     if (categoryLower.includes('coiff') || categoryLower.includes('hair')) {
       categoryTitle = 'Coiffeurs et Salons de Coiffure';
       humanCategory = 'coiffeurs et salons de coiffure';
       typeQueryFilter = { typeEtablissement: { $in: ['salon_coiffure', 'mixte', 'autre'] } };
+      clientRedirectPath = `/coiffeurs/${rawCity || 'tous'}`;
     } else if (categoryLower.includes('barber') || categoryLower.includes('barbier')) {
       categoryTitle = 'Barber Shops et Barbiers';
       humanCategory = 'barber shops et barbiers pour hommes';
       typeQueryFilter = { typeEtablissement: 'barbershop' };
-    } else if (categoryLower.includes('soin') || categoryLower.includes('institut') || categoryLower.includes('spa')) {
-      categoryTitle = 'Instituts de Beauté et Spas';
-      humanCategory = 'instituts de beauté, soins et spas';
-      typeQueryFilter = { typeEtablissement: { $in: ['institut_beaute', 'spa', 'onglerie'] } };
+      clientRedirectPath = `/barbiers/${rawCity || 'tous'}`;
+    } else if (categoryLower.includes('spa')) {
+      categoryTitle = 'Spas & Centres de Relaxation';
+      humanCategory = 'spas, massages et centres de bien-être';
+      typeQueryFilter = { typeEtablissement: { $in: ['spa', 'institut_beaute', 'mixte'] } };
+      clientRedirectPath = `/spas/${rawCity || 'tous'}`;
+    } else if (categoryLower.includes('ongle') || categoryLower.includes('nail') || categoryLower.includes('manucure')) {
+      categoryTitle = 'Bars à Ongles & Ongleries';
+      humanCategory = 'ongleries, manucure et pose ongles';
+      typeQueryFilter = { typeEtablissement: { $in: ['onglerie', 'institut_beaute', 'mixte'] } };
+      clientRedirectPath = `/ongleries/${rawCity || 'tous'}`;
+    } else if (categoryLower.includes('soin') || categoryLower.includes('institut') || categoryLower.includes('maquillage')) {
+      categoryTitle = 'Instituts de Beauté & Soins Esthétiques';
+      humanCategory = 'instituts de beauté, soins et esthétique';
+      typeQueryFilter = { typeEtablissement: { $in: ['institut_beaute', 'spa', 'onglerie', 'mixte'] } };
+      clientRedirectPath = `/instituts-de-beaute/${rawCity || 'tous'}`;
     }
 
     const cityRegex = new RegExp(city, 'i');
@@ -1143,13 +1161,13 @@ exports.getCitySharePreview = async (req, res) => {
     };
 
     const salons = await Salon.find(query)
-      .select('name nom slug address ville pays rating reviewCount logoUrl bannerUrl galleryUrls typeEtablissement description horaires devise')
+      .select('name nom slug address ville pays rating reviewCount logoUrl bannerUrl galleryUrls typeEtablissement description horaires devise createdAt')
+      .sort({ createdAt: -1 })
       .limit(50)
       .lean();
 
     const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
-    const canonicalPath = rawCategory ? `/${rawCategory}/${rawCity}` : `/salons/${rawCity || 'tous'}`;
-    const canonicalUrl = `${frontendUrl}${canonicalPath}`;
+    const canonicalUrl = `${frontendUrl}${clientRedirectPath}`;
 
     const title = `${categoryTitle} à ${formattedCity} (2026) : Avis, Tarifs & Réservation 24/7 | BeautyFlow Africa`;
     const description = `Trouvez les meilleurs ${humanCategory} à ${formattedCity}. Comparez les avis vérifiés, tarifs, photos, horaires et réservez instantanément votre rendez-vous en ligne sur BeautyFlow Africa.`;
@@ -1166,7 +1184,7 @@ exports.getCitySharePreview = async (req, res) => {
       "itemListElement": salons.map((s, idx) => {
         const sName = s.name || s.nom || 'Salon';
         const sUrl = `${frontendUrl}/salon/${s.slug}`;
-        const sType = s.typeEtablissement === 'barbershop' ? 'Barbershop' : (s.typeEtablissement === 'institut_beaute' ? 'BeautySalon' : 'HairSalon');
+        const sType = s.typeEtablissement === 'barbershop' ? 'Barbershop' : (s.typeEtablissement === 'institut_beaute' ? 'BeautySalon' : (s.typeEtablissement === 'spa' ? 'DaySpa' : 'HairSalon'));
         return {
           "@type": "ListItem",
           "position": idx + 1,
@@ -1175,7 +1193,7 @@ exports.getCitySharePreview = async (req, res) => {
             "@id": sUrl,
             "name": sName,
             "url": sUrl,
-            "description": s.description || `${sName}, votre salon de beauté à ${s.ville || formattedCity}.`,
+            "description": s.description || `${sName}, votre établissement à ${s.ville || formattedCity}.`,
             "telephone": s.phone || undefined,
             "address": {
               "@type": "PostalAddress",
@@ -1211,7 +1229,7 @@ exports.getCitySharePreview = async (req, res) => {
         {
           "@type": "ListItem",
           "position": 2,
-          "name": `Salons ${formattedCity}`,
+          "name": `${categoryTitle} ${formattedCity}`,
           "item": canonicalUrl
         }
       ]
@@ -1224,7 +1242,7 @@ exports.getCitySharePreview = async (req, res) => {
       "mainEntity": [
         {
           "@type": "Question",
-          "name": `Quels sont les meilleurs salons de coiffure et beauté à ${formattedCity} ?`,
+          "name": `Quels sont les meilleurs ${humanCategory} à ${formattedCity} ?`,
           "acceptedAnswer": {
             "@type": "Answer",
             "text": `Parmi les établissements les plus réputés à ${formattedCity} sur BeautyFlow Africa : ${salons.slice(0, 5).map(s => s.name || s.nom).join(', ') || 'découvrez notre sélection vérifiée'}. Tous offrent la prise de rendez-vous en ligne avec avis clients certifiés.`
@@ -1232,18 +1250,18 @@ exports.getCitySharePreview = async (req, res) => {
         },
         {
           "@type": "Question",
-          "name": `Comment réserver un coiffeur ou un institut de beauté à ${formattedCity} ?`,
+          "name": `Comment réserver un ${humanCategory} à ${formattedCity} ?`,
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": `Sur BeautyFlow Africa, choisissez votre salon à ${formattedCity}, sélectionnez vos prestations (coupe, tresses, coloration, soin du visage, manucure) et réservez votre créneau 24h/24 sans avoir besoin d'appeler.`
+            "text": `Sur BeautyFlow Africa, choisissez votre établissement à ${formattedCity}, sélectionnez vos prestations (coupe, tresses, spa, massage, soin du visage, manucure) et réservez votre créneau 24h/24 sans attente téléphonique.`
           }
         },
         {
           "@type": "Question",
-          "name": `Combien coûte une coupe de cheveux ou un soin à ${formattedCity} ?`,
+          "name": `Combien coûte une prestation à ${formattedCity} ?`,
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": `Les prix varient selon le type d'établissement et de prestation, généralement entre 2 000 FCFA et 40 000 FCFA. Les tarifs de chaque salon sont transparents et affichés sur leur fiche BeautyFlow.`
+            "text": `Les prix varient selon le type d'établissement et de prestation, généralement entre 2 000 FCFA et 45 000 FCFA. Les tarifs de chaque salon sont transparents et affichés sur leur fiche BeautyFlow.`
           }
         }
       ]
@@ -1252,7 +1270,7 @@ exports.getCitySharePreview = async (req, res) => {
     const salonsCardsHtml = salons.map(s => {
       const sName = s.name || s.nom || 'Salon';
       const sUrl = `${frontendUrl}/salon/${s.slug}`;
-      const sImg = s.bannerUrl || (s.galleryUrls && s.galleryUrls[0]) || s.logoUrl || `${frontendUrl}/beautyflow-banner.png`;
+      const sImg = s.bannerUrl || (Array.isArray(s.galleryUrls) && s.galleryUrls[0]) || s.logoUrl || `${frontendUrl}/beautyflow-banner.png`;
       return `
       <article style="border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 20px; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
         <h2 style="font-size: 1.35rem; margin: 0 0 6px 0;">
@@ -1326,8 +1344,10 @@ ${JSON.stringify(faqSchema, null, 2)}
     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
       <a href="${frontendUrl}/salons/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Tous les salons</a>
       <a href="${frontendUrl}/coiffeurs/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Coiffeurs</a>
+      <a href="${frontendUrl}/spas/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Spas & Massages</a>
       <a href="${frontendUrl}/barbiers/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Barbers</a>
-      <a href="${frontendUrl}/instituts-de-beaute/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Instituts & Spas</a>
+      <a href="${frontendUrl}/ongleries/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Ongleries</a>
+      <a href="${frontendUrl}/instituts-de-beaute/${rawCity || 'tous'}" style="background: #f1f5f9; color: #334155; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85rem; font-weight: 500;">Instituts & Soins</a>
     </div>
   </header>
 
@@ -1342,17 +1362,17 @@ ${JSON.stringify(faqSchema, null, 2)}
     <section style="margin-bottom: 40px; background: white; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
       <h2 style="font-size: 1.5rem; color: #0f172a; margin-bottom: 16px;">Questions Fréquentes sur la beauté à ${formattedCity}</h2>
       <div style="margin-bottom: 18px;">
-        <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 4px;">Comment trouver le meilleur coiffeur ou salon à ${formattedCity} ?</h3>
-        <p style="color: #475569; font-size: 0.95rem; margin: 0;">Consultez les notes et avis certifiés de clients réels sur BeautyFlow Africa. Filtrez par spécialité (tresses, locks, coloration, lissage, barbe, soins) et réservez directement le professionnel le mieux noté.</p>
+        <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 4px;">Comment trouver le meilleur établissement à ${formattedCity} ?</h3>
+        <p style="color: #475569; font-size: 0.95rem; margin: 0;">Consultez les notes et avis certifiés de clients réels sur BeautyFlow Africa. Filtrez par spécialité (tresses, locks, coloration, lissage, barbe, soins, spa) et réservez directement le professionnel le mieux noté.</p>
       </div>
       <div style="margin-bottom: 18px;">
         <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 4px;">Pourquoi réserver son salon en ligne sur BeautyFlow Africa ?</h3>
-        <p style="color: #475569; font-size: 0.95rem; margin: 0;">BeautyFlow vous évite les longues files d'attente au salon, vous garantit votre créneau avec un rappel automatique par SMS/WhatsApp, et vous permet de comparer les prix en toute transparence.</p>
+        <p style="color: #475569; font-size: 0.95rem; margin: 0;">BeautyFlow vous évite les longues files d'attente, vous garantit votre créneau avec un rappel automatique par SMS/WhatsApp, et vous permet de comparer les prix en toute transparence.</p>
       </div>
     </section>
 
     <section style="margin-bottom: 30px; background: #fff1f2; padding: 20px; border-radius: 12px; border: 1px solid #fecdd3;">
-      <h3 style="font-size: 1.2rem; color: #9f1239; margin: 0 0 8px 0;">Vous êtes propriétaire d'un salon de coiffure ou institut à ${formattedCity} ?</h3>
+      <h3 style="font-size: 1.2rem; color: #9f1239; margin: 0 0 8px 0;">Vous êtes propriétaire d'un salon, spa ou institut à ${formattedCity} ?</h3>
       <p style="color: #4c0519; font-size: 0.95rem; margin: 0 0 14px 0;">Attirez de nouveaux clients chaque jour et simplifiez la gestion de vos rendez-vous, paiements et fidélité.</p>
       <a href="${frontendUrl}/pro" style="background: #e11d48; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;">Rejoindre BeautyFlow Pro</a>
     </section>
@@ -1382,10 +1402,15 @@ exports.generateSitemapXml = async (req, res) => {
     const baseUrl = (process.env.BACKEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
 
     const salons = await Salon.find({ isActive: true, isHidden: { $ne: true }, hidden: { $ne: true } })
-      .select('name nom slug ville typeEtablissement bannerUrl galleryUrls logoUrl updatedAt')
+      .select('name nom slug ville typeEtablissement bannerUrl galleryUrls logoUrl updatedAt createdAt')
       .lean();
 
-    const citiesSet = new Set();
+    const citiesSet = new Set([
+      'bafoussam', 'douala', 'yaounde', 'bamenda', 'garoua', 'maroua', 'kribi', 'limbe',
+      'bafang', 'dschang', 'bertoua', 'ngaoundere', 'ebolowa', 'abidjan', 'dakar', 'libreville',
+      'cotonou', 'lome', 'kinshasa'
+    ]);
+
     salons.forEach(s => {
       if (s.ville) {
         const cleanCity = s.ville.toLowerCase().trim().replace(/\s+/g, '-');
@@ -1415,40 +1440,30 @@ exports.generateSitemapXml = async (req, res) => {
       xml += `  </url>\n`;
     });
 
+    const categoryPrefixes = [
+      { path: 'salons', priority: '0.85' },
+      { path: 'coiffeurs', priority: '0.80' },
+      { path: 'barbiers', priority: '0.80' },
+      { path: 'spas', priority: '0.80' },
+      { path: 'ongleries', priority: '0.80' },
+      { path: 'instituts-de-beaute', priority: '0.80' }
+    ];
+
     Array.from(citiesSet).forEach(citySlug => {
-      xml += `  <url>\n`;
-      xml += `    <loc>${frontendUrl}/salons/${citySlug}</loc>\n`;
-      xml += `    <lastmod>${nowIso}</lastmod>\n`;
-      xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>0.85</priority>\n`;
-      xml += `  </url>\n`;
-
-      xml += `  <url>\n`;
-      xml += `    <loc>${frontendUrl}/coiffeurs/${citySlug}</loc>\n`;
-      xml += `    <lastmod>${nowIso}</lastmod>\n`;
-      xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>0.80</priority>\n`;
-      xml += `  </url>\n`;
-
-      xml += `  <url>\n`;
-      xml += `    <loc>${frontendUrl}/barbiers/${citySlug}</loc>\n`;
-      xml += `    <lastmod>${nowIso}</lastmod>\n`;
-      xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>0.80</priority>\n`;
-      xml += `  </url>\n`;
-
-      xml += `  <url>\n`;
-      xml += `    <loc>${frontendUrl}/instituts-de-beaute/${citySlug}</loc>\n`;
-      xml += `    <lastmod>${nowIso}</lastmod>\n`;
-      xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>0.80</priority>\n`;
-      xml += `  </url>\n`;
+      categoryPrefixes.forEach(cat => {
+        xml += `  <url>\n`;
+        xml += `    <loc>${frontendUrl}/${cat.path}/${citySlug}</loc>\n`;
+        xml += `    <lastmod>${nowIso}</lastmod>\n`;
+        xml += `    <changefreq>daily</changefreq>\n`;
+        xml += `    <priority>${cat.priority}</priority>\n`;
+        xml += `  </url>\n`;
+      });
     });
 
     salons.forEach(s => {
       if (s.slug) {
         const sName = s.name || s.nom || 'Salon de beauté';
-        let imageUrl = s.bannerUrl || (s.galleryUrls && s.galleryUrls[0]) || s.logoUrl || '';
+        let imageUrl = s.bannerUrl || (Array.isArray(s.galleryUrls) && s.galleryUrls[0]) || s.logoUrl || '';
         if (imageUrl && !imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
           const cleanPath = imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`;
           imageUrl = `${baseUrl}${cleanPath}`;
@@ -1456,7 +1471,7 @@ exports.generateSitemapXml = async (req, res) => {
 
         xml += `  <url>\n`;
         xml += `    <loc>${frontendUrl}/salon/${s.slug}</loc>\n`;
-        xml += `    <lastmod>${s.updatedAt ? new Date(s.updatedAt).toISOString() : nowIso}</lastmod>\n`;
+        xml += `    <lastmod>${s.updatedAt ? new Date(s.updatedAt).toISOString() : (s.createdAt ? new Date(s.createdAt).toISOString() : nowIso)}</lastmod>\n`;
         xml += `    <changefreq>weekly</changefreq>\n`;
         xml += `    <priority>0.9</priority>\n`;
         if (imageUrl) {

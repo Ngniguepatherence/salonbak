@@ -104,6 +104,8 @@ exports.onboardSalon = async (req, res, next) => {
     const selectedPlan = await getPlan(plan || 'pro');
     const trialDays = selectedPlan.trialDurationDays || 14;
 
+    const defaultBanner = bannerUrl || (Array.isArray(galleryUrls) && galleryUrls.length > 0 ? galleryUrls[0] : '');
+
     const salon = await Salon.create({
       name: salonName,
       phone: salonPhone,
@@ -113,7 +115,7 @@ exports.onboardSalon = async (req, res, next) => {
       typeEtablissement: typeEtablissement || 'salon_coiffure',
       description,
       logoUrl,
-      bannerUrl,
+      bannerUrl: defaultBanner,
       galleryUrls: galleryUrls || [],
       slogan,
       devise: devise || 'FCFA',
@@ -237,6 +239,13 @@ exports.updateSalon = async (req, res, next) => {
 
     if (Object.keys(body).length === 0) {
       return res.status(400).json({ success: false, message: 'Aucun champ modifiable fourni' });
+    }
+
+    if (Array.isArray(body.galleryUrls) && body.galleryUrls.length > 0 && !body.bannerUrl) {
+      const existing = await Salon.findById(req.params.salonId).select('bannerUrl');
+      if (existing && !existing.bannerUrl) {
+        body.bannerUrl = body.galleryUrls[0];
+      }
     }
 
     const salon = await Salon.findByIdAndUpdate(

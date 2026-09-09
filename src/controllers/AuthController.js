@@ -794,7 +794,7 @@ exports.getAffiliateStats = async (req, res, next) => {
   }
 };
 
-// @desc    Create custom or auto affiliate code
+// @desc    Create or modify custom / auto affiliate code
 // @route   POST /api/auth/affiliate/create-code
 // @access  Private
 exports.createAffiliateCode = async (req, res, next) => {
@@ -805,14 +805,19 @@ exports.createAffiliateCode = async (req, res, next) => {
 
     let { code } = req.body;
 
+    const user = await Affiliate.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Affilié non trouvé' });
+    }
+
     if (code) {
       code = code.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-      if (code.length < 3) {
-        return res.status(400).json({ success: false, message: 'Le code doit contenir au moins 3 caractères (lettres ou chiffres)' });
+      if (code.length < 3 || code.length > 25) {
+        return res.status(400).json({ success: false, message: 'Le code doit contenir entre 3 et 25 caractères (lettres, chiffres, tirets)' });
       }
 
       const existing = await Affiliate.findOne({ affiliateCode: code });
-      if (existing) {
+      if (existing && existing._id.toString() !== user._id.toString()) {
         return res.status(400).json({ success: false, message: "Ce code d'affiliation est déjà utilisé par un autre partenaire." });
       }
     } else {
@@ -824,21 +829,52 @@ exports.createAffiliateCode = async (req, res, next) => {
       }
     }
 
-    const user = await Affiliate.findById(req.user.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'Affilié non trouvé' });
-    }
-
+    const oldCode = user.affiliateCode;
     user.affiliateCode = code;
     await user.save();
 
+    // Mettre à jour la continuité des salons et users déjà affiliés en cas de modification
+    if (oldCode && oldCode !== code) {
+      await Salon.updateMany({ affiliateCode: oldCode }, { $set: { affiliateCode: code } });
+      await User.updateMany({ affiliateCode: oldCode }, { $set: { affiliateCode: code } });
+    }
+
     res.status(200).json({
       success: true,
-      message: "Code d'affiliation créé avec succès",
+      message: oldCode ? "Code promo / affiliation modifié avec succès" : "Code d'affiliation créé avec succès",
       code
     });
   } catch (err) {
     console.error('Erreur createAffiliateCode:', err);
+    next(err);
+  }
+};
+
+// @desc    Validate an affiliate code
+// @route   GET /api/auth/affiliate/validate/:code
+// @access  Public
+exports.validateAffiliateCode = async (req, res, next) => {
+  try {
+    const rawCode = req.params.code;
+    if (!rawCode) {
+      return res.status(400).json({ success: false, valid: false, message: 'Code requis' });
+    }
+
+    const cleanCode = rawCode.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    const affiliate = await Affiliate.findOne({ affiliateCode: cleanCode });
+
+    if (!affiliate) {
+      return res.status(200).json({ success: true, valid: false, message: 'Code promo ou affilié invalide' });
+    }
+
+    res.status(200).json({
+      success: true,
+      valid: true,
+      code: affiliate.affiliateCode,
+      partnerName: affiliate.nom || affiliate.name || 'Partenaire Officiel'
+    });
+  } catch (err) {
+    console.error('Erreur validateAffiliateCode:', err);
     next(err);
   }
 };

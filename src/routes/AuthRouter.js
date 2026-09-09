@@ -14,6 +14,7 @@ const {
   updatePayoutConfig,
   getAffiliateStats,
   createAffiliateCode,
+  validateAffiliateCode,
   updateAffiliateProfile,
   verifyAffiliateEmail,
   resendAffiliateEmailCode
@@ -42,6 +43,7 @@ router.post('/affiliate/verify-email', protect, verifyAffiliateEmail);
 router.post('/affiliate/resend-email', protect, resendAffiliateEmailCode);
 router.put('/affiliate/payout-config', protect, updatePayoutConfig);
 router.get('/affiliate/stats', protect, getAffiliateStats);
+router.get('/affiliate/validate/:code', validateAffiliateCode);
 router.post('/affiliate/create-code', protect, createAffiliateCode);
 router.put('/affiliate/profile', protect, updateAffiliateProfile);
 

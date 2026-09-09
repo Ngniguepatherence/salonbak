@@ -370,6 +370,11 @@ function createSlugString(text) {
 }
 
 salonSchema.pre('save', async function () {
+  // Auto-attribution de la bannière par défaut si des photos de galerie existent
+  if (!this.bannerUrl && Array.isArray(this.galleryUrls) && this.galleryUrls.length > 0) {
+    this.bannerUrl = this.galleryUrls[0];
+  }
+
   if (!this.slug || this.isModified('name') || this.isModified('ville')) {
     const baseStr = [this.name, this.ville || ''].filter(Boolean).join(' ');
     let candidateSlug = createSlugString(baseStr);
