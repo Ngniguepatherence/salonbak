@@ -1441,8 +1441,10 @@ exports.generateSitemapXml = async (req, res) => {
     });
 
     const categoryPrefixes = [
-      { path: 'salons', priority: '0.85' },
-      { path: 'coiffeurs', priority: '0.80' },
+      { path: 'salons', priority: '0.90' },
+      { path: 'salons-de-coiffure', priority: '0.90' },
+      { path: 'coiffeurs', priority: '0.85' },
+      { path: 'coiffure', priority: '0.85' },
       { path: 'barbiers', priority: '0.80' },
       { path: 'spas', priority: '0.80' },
       { path: 'ongleries', priority: '0.80' },
