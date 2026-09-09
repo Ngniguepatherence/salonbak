@@ -1395,20 +1395,102 @@ ${JSON.stringify(faqSchema, null, 2)}
   }
 };
 
-// GET /sitemap.xml
-exports.generateSitemapXml = async (req, res) => {
+// GET /sitemap.xml (Sitemap Index)
+exports.generateSitemapIndexXml = async (req, res) => {
+  try {
+    const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+    const nowIso = new Date().toISOString();
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+    xml += `  <sitemap>\n`;
+    xml += `    <loc>${frontendUrl}/sitemap-salons.xml</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
+    xml += `  </sitemap>\n`;
+    xml += `  <sitemap>\n`;
+    xml += `    <loc>${frontendUrl}/sitemap-villes.xml</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
+    xml += `  </sitemap>\n`;
+    xml += `  <sitemap>\n`;
+    xml += `    <loc>${frontendUrl}/sitemap-pages.xml</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
+    xml += `  </sitemap>\n`;
+    xml += `</sitemapindex>`;
+
+    res.setHeader('Content-Type', 'text/xml');
+    res.status(200).send(xml);
+  } catch (error) {
+    console.error('Error generating sitemap index XML:', error);
+    res.status(500).send('Server Error');
+  }
+};
+
+// GET /sitemap-salons.xml (All individual active salon profiles)
+exports.generateSitemapSalonsXml = async (req, res) => {
   try {
     const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
     const baseUrl = (process.env.BACKEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+    const nowIso = new Date().toISOString();
 
     const salons = await Salon.find({ isActive: true, isHidden: { $ne: true }, hidden: { $ne: true } })
       .select('name nom slug ville typeEtablissement bannerUrl galleryUrls logoUrl updatedAt createdAt')
       .lean();
 
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"\n`;
+    xml += `        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n`;
+
+    salons.forEach(s => {
+      if (s.slug) {
+        const sName = s.name || s.nom || 'Salon de beauté';
+        let imageUrl = s.bannerUrl || (Array.isArray(s.galleryUrls) && s.galleryUrls[0]) || s.logoUrl || '';
+        if (imageUrl && !imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+          const cleanPath = imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`;
+          imageUrl = `${baseUrl}${cleanPath}`;
+        }
+
+        const lastmod = s.updatedAt ? new Date(s.updatedAt).toISOString() : (s.createdAt ? new Date(s.createdAt).toISOString() : nowIso);
+
+        xml += `  <url>\n`;
+        xml += `    <loc>${frontendUrl}/salon/${s.slug}</loc>\n`;
+        xml += `    <lastmod>${lastmod}</lastmod>\n`;
+        xml += `    <changefreq>weekly</changefreq>\n`;
+        xml += `    <priority>0.95</priority>\n`;
+        if (imageUrl) {
+          xml += `    <image:image>\n`;
+          xml += `      <image:loc>${imageUrl}</image:loc>\n`;
+          xml += `      <image:title><![CDATA[${sName} - ${s.ville || 'BeautyFlow Africa'}]]></image:title>\n`;
+          xml += `      <image:caption><![CDATA[Prestations et réservation en ligne chez ${sName} à ${s.ville || 'Afrique'} sur BeautyFlow]]></image:caption>\n`;
+          xml += `    </image:image>\n`;
+        }
+        xml += `  </url>\n`;
+      }
+    });
+
+    xml += `</urlset>`;
+
+    res.setHeader('Content-Type', 'text/xml');
+    res.status(200).send(xml);
+  } catch (error) {
+    console.error('Error generating sitemap salons XML:', error);
+    res.status(500).send('Server Error');
+  }
+};
+
+// GET /sitemap-villes.xml (Consistent city hubs across all cities)
+exports.generateSitemapVillesXml = async (req, res) => {
+  try {
+    const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+    const nowIso = new Date().toISOString();
+
+    const salons = await Salon.find({ isActive: true, isHidden: { $ne: true }, hidden: { $ne: true } })
+      .select('ville')
+      .lean();
+
     const citiesSet = new Set([
       'bafoussam', 'douala', 'yaounde', 'bamenda', 'garoua', 'maroua', 'kribi', 'limbe',
-      'bafang', 'dschang', 'bertoua', 'ngaoundere', 'ebolowa', 'abidjan', 'dakar', 'libreville',
-      'cotonou', 'lome', 'kinshasa'
+      'bafang', 'dschang', 'foumban', 'bertoua', 'ngaoundere', 'ebolowa', 'buea', 'abidjan',
+      'dakar', 'libreville', 'cotonou', 'lome', 'kinshasa'
     ]);
 
     salons.forEach(s => {
@@ -1418,38 +1500,17 @@ exports.generateSitemapXml = async (req, res) => {
       }
     });
 
-    const nowIso = new Date().toISOString();
-
-    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"\n`;
-    xml += `        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n`;
-
-    const staticPages = [
-      { url: '/', priority: '1.0', changefreq: 'daily' },
-      { url: '/explorer', priority: '0.9', changefreq: 'daily' },
-      { url: '/privacy', priority: '0.3', changefreq: 'monthly' },
-      { url: '/pro', priority: '0.8', changefreq: 'weekly' },
-    ];
-
-    staticPages.forEach(p => {
-      xml += `  <url>\n`;
-      xml += `    <loc>${frontendUrl}${p.url}</loc>\n`;
-      xml += `    <lastmod>${nowIso}</lastmod>\n`;
-      xml += `    <changefreq>${p.changefreq}</changefreq>\n`;
-      xml += `    <priority>${p.priority}</priority>\n`;
-      xml += `  </url>\n`;
-    });
-
     const categoryPrefixes = [
-      { path: 'salons', priority: '0.90' },
-      { path: 'salons-de-coiffure', priority: '0.90' },
-      { path: 'coiffeurs', priority: '0.85' },
-      { path: 'coiffure', priority: '0.85' },
+      { path: 'salons', priority: '0.85' },
+      { path: 'coiffeurs', priority: '0.80' },
       { path: 'barbiers', priority: '0.80' },
       { path: 'spas', priority: '0.80' },
       { path: 'ongleries', priority: '0.80' },
       { path: 'instituts-de-beaute', priority: '0.80' }
     ];
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
 
     Array.from(citiesSet).forEach(citySlug => {
       categoryPrefixes.forEach(cat => {
@@ -1462,29 +1523,43 @@ exports.generateSitemapXml = async (req, res) => {
       });
     });
 
-    salons.forEach(s => {
-      if (s.slug) {
-        const sName = s.name || s.nom || 'Salon de beauté';
-        let imageUrl = s.bannerUrl || (Array.isArray(s.galleryUrls) && s.galleryUrls[0]) || s.logoUrl || '';
-        if (imageUrl && !imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
-          const cleanPath = imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`;
-          imageUrl = `${baseUrl}${cleanPath}`;
-        }
+    xml += `</urlset>`;
 
-        xml += `  <url>\n`;
-        xml += `    <loc>${frontendUrl}/salon/${s.slug}</loc>\n`;
-        xml += `    <lastmod>${s.updatedAt ? new Date(s.updatedAt).toISOString() : (s.createdAt ? new Date(s.createdAt).toISOString() : nowIso)}</lastmod>\n`;
-        xml += `    <changefreq>weekly</changefreq>\n`;
-        xml += `    <priority>0.9</priority>\n`;
-        if (imageUrl) {
-          xml += `    <image:image>\n`;
-          xml += `      <image:loc>${imageUrl}</image:loc>\n`;
-          xml += `      <image:title><![CDATA[${sName} - ${s.ville || 'BeautyFlow Africa'}]]></image:title>\n`;
-          xml += `      <image:caption><![CDATA[Réservation en ligne chez ${sName} à ${s.ville || 'Afrique'} sur BeautyFlow]]></image:caption>\n`;
-          xml += `    </image:image>\n`;
-        }
-        xml += `  </url>\n`;
-      }
+    res.setHeader('Content-Type', 'text/xml');
+    res.status(200).send(xml);
+  } catch (error) {
+    console.error('Error generating sitemap villes XML:', error);
+    res.status(500).send('Server Error');
+  }
+};
+
+// GET /sitemap-pages.xml (Static platform pages)
+exports.generateSitemapPagesXml = async (req, res) => {
+  try {
+    const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+    const nowIso = new Date().toISOString();
+
+    const staticPages = [
+      { url: '/', priority: '1.0', changefreq: 'daily' },
+      { url: '/cm', priority: '0.9', changefreq: 'daily' },
+      { url: '/ci', priority: '0.9', changefreq: 'daily' },
+      { url: '/sn', priority: '0.9', changefreq: 'daily' },
+      { url: '/explorer', priority: '0.9', changefreq: 'daily' },
+      { url: '/pro', priority: '0.85', changefreq: 'weekly' },
+      { url: '/affiliate', priority: '0.75', changefreq: 'weekly' },
+      { url: '/privacy', priority: '0.30', changefreq: 'monthly' },
+    ];
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+
+    staticPages.forEach(p => {
+      xml += `  <url>\n`;
+      xml += `    <loc>${frontendUrl}${p.url}</loc>\n`;
+      xml += `    <lastmod>${nowIso}</lastmod>\n`;
+      xml += `    <changefreq>${p.changefreq}</changefreq>\n`;
+      xml += `    <priority>${p.priority}</priority>\n`;
+      xml += `  </url>\n`;
     });
 
     xml += `</urlset>`;
@@ -1492,10 +1567,13 @@ exports.generateSitemapXml = async (req, res) => {
     res.setHeader('Content-Type', 'text/xml');
     res.status(200).send(xml);
   } catch (error) {
-    console.error('Error generating sitemap XML:', error);
+    console.error('Error generating sitemap pages XML:', error);
     res.status(500).send('Server Error');
   }
 };
+
+// GET /sitemap.xml (Legacy fallback redirecting to sitemap index logic)
+exports.generateSitemapXml = exports.generateSitemapIndexXml;
 
 // GET /robots.txt
 exports.getRobotsTxt = async (req, res) => {

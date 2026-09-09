@@ -21,6 +21,10 @@ const {
   getClientLoyalty,
   confirmBookingCompletion,
   generateSitemapXml,
+  generateSitemapIndexXml,
+  generateSitemapSalonsXml,
+  generateSitemapVillesXml,
+  generateSitemapPagesXml,
   getRobotsTxt,
   trackSalonEvent,
   getSalonAnalytics
@@ -37,7 +41,10 @@ const loginLimiter = rateLimit({
 });
 
 // Sitemap & Robots
-router.get('/sitemap.xml', generateSitemapXml);
+router.get('/sitemap.xml', generateSitemapIndexXml || generateSitemapXml);
+router.get('/sitemap-salons.xml', generateSitemapSalonsXml);
+router.get('/sitemap-villes.xml', generateSitemapVillesXml);
+router.get('/sitemap-pages.xml', generateSitemapPagesXml);
 router.get('/robots.txt', getRobotsTxt);
 
 // Auth routes for marketplace
