@@ -4,6 +4,8 @@ const {
   getAllSalons,
   getDashboardStats,
   updateSalonStatus,
+  updateSalon,
+  deleteSalon,
   createSalon,
   getSalonUsers,
   addSalonStaff,
@@ -21,6 +23,10 @@ router.use(authorize('admin'));
 router.route('/salons')
   .get(getAllSalons)
   .post(createSalon);
+
+router.route('/salons/:id')
+  .put(updateSalon)
+  .delete(deleteSalon);
 
 router.route('/salons/:id/status')
   .put(updateSalonStatus);

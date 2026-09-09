@@ -24,7 +24,10 @@ const {
   generateSitemapIndexXml,
   generateSitemapSalonsXml,
   generateSitemapVillesXml,
+  generateSitemapBlogXml,
   generateSitemapPagesXml,
+  createSalonReview,
+  getSalonReviews,
   getRobotsTxt,
   trackSalonEvent,
   getSalonAnalytics
@@ -44,6 +47,7 @@ const loginLimiter = rateLimit({
 router.get('/sitemap.xml', generateSitemapIndexXml || generateSitemapXml);
 router.get('/sitemap-salons.xml', generateSitemapSalonsXml);
 router.get('/sitemap-villes.xml', generateSitemapVillesXml);
+router.get('/sitemap-blog.xml', generateSitemapBlogXml);
 router.get('/sitemap-pages.xml', generateSitemapPagesXml);
 router.get('/robots.txt', getRobotsTxt);
 
@@ -62,6 +66,8 @@ router.post('/auth/favorites/toggle', protectAppUser, toggleFavorite);
 // Public browsing routes
 router.get('/salons', getSalons);
 router.get('/salons/:slug', getSalonBySlug);
+router.get('/salons/:slug/reviews', getSalonReviews);
+router.post('/salons/:slug/reviews', optionalAppUser, createSalonReview);
 router.get('/salons/:slug/share-preview', getSalonSharePreview);
 router.get('/salons/city-preview/:city', getCitySharePreview);
 router.get('/salons/city-preview/:category/:city', getCitySharePreview);

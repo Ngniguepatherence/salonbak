@@ -122,6 +122,31 @@ const connectDB = async () => {
       console.error('❌ Error seeding/syncing default plans:', seedError.message);
     }
 
+    // Seeding et vérification de l'administrateur système
+    try {
+      const User = require('../models/User');
+      const adminEmail = process.env.ADMIN_EMAIL || 'admin@beautyflow.com';
+      const existingAdmin = await User.findOne({ email: adminEmail });
+      if (!existingAdmin) {
+        const defaultPassword = process.env.ADMIN_PASSWORD || 'admin2025';
+        await User.create({
+          name: 'Super Administrateur',
+          email: adminEmail,
+          password: defaultPassword,
+          role: 'admin',
+          actif: true,
+        });
+        console.log(`👑 Default admin user created: ${adminEmail}`);
+      } else if (existingAdmin.role !== 'admin' || !existingAdmin.actif) {
+        existingAdmin.role = 'admin';
+        existingAdmin.actif = true;
+        await existingAdmin.save();
+        console.log(`👑 Admin user privileges updated for: ${adminEmail}`);
+      }
+    } catch (adminSeedError) {
+      console.error('❌ Error seeding/verifying admin user:', adminSeedError.message);
+    }
+
   } catch (error) {
     console.error('❌ Database connection error:', error.message);
     process.exit(1);

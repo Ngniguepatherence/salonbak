@@ -110,6 +110,133 @@ exports.updateSalonStatus = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * @desc    Update any salon details (position, isSponsored, active/inactive, branding, etc.)
+ * @route   PUT /api/admin/salons/:id
+ * @access  Private/Admin
+ */
+exports.updateSalon = async (req, res, next) => {
+  try {
+    const salon = await Salon.findById(req.params.id);
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable' });
+    }
+
+    const {
+      name,
+      slug,
+      slogan,
+      description,
+      typeEtablissement,
+      businessType,
+      phone,
+      email,
+      address,
+      ville,
+      pays,
+      location,
+      isSponsored,
+      isActive,
+      isHidden,
+      hidden,
+      logoUrl,
+      bannerUrl,
+      galleryUrls,
+      plan,
+      abonnement,
+      branding
+    } = req.body;
+
+    if (name !== undefined) salon.name = name;
+    if (slug !== undefined) salon.slug = slug;
+    if (slogan !== undefined) salon.slogan = slogan;
+    if (description !== undefined) salon.description = description;
+    if (typeEtablissement !== undefined) salon.typeEtablissement = typeEtablissement;
+    if (businessType !== undefined) salon.businessType = businessType;
+    if (phone !== undefined) salon.phone = phone;
+    if (email !== undefined) salon.email = email;
+    if (address !== undefined) salon.address = address;
+    if (ville !== undefined) salon.ville = ville;
+    if (pays !== undefined) salon.pays = pays;
+    if (logoUrl !== undefined) salon.logoUrl = logoUrl;
+    if (bannerUrl !== undefined) salon.bannerUrl = bannerUrl;
+    if (galleryUrls !== undefined) salon.galleryUrls = galleryUrls;
+    if (isActive !== undefined) salon.isActive = isActive;
+    if (isHidden !== undefined) salon.isHidden = isHidden;
+    if (hidden !== undefined) salon.hidden = hidden;
+    if (isSponsored !== undefined) {
+      salon.isSponsored = Boolean(isSponsored);
+      if (!salon.branding) salon.branding = {};
+      salon.branding.isSponsored = Boolean(isSponsored);
+    }
+
+    if (location !== undefined && typeof location === 'object') {
+      salon.location = {
+        lat: location.lat !== undefined && location.lat !== null && location.lat !== '' ? Number(location.lat) : undefined,
+        lng: location.lng !== undefined && location.lng !== null && location.lng !== '' ? Number(location.lng) : undefined
+      };
+    }
+
+    if (branding !== undefined && typeof branding === 'object') {
+      salon.branding = { ...salon.branding, ...branding };
+    }
+
+    if (plan !== undefined) {
+      const { getPlan } = require('../config/plans');
+      const selectedPlan = await getPlan(plan);
+      salon.plan = plan;
+      salon.limits = {
+        maxCustomers: selectedPlan.maxCustomers !== undefined ? selectedPlan.maxCustomers : -1,
+        maxStaff: selectedPlan.maxStaff !== undefined ? selectedPlan.maxStaff : -1,
+        maxRendezvous: selectedPlan.maxRendezvous !== undefined ? selectedPlan.maxRendezvous : -1,
+        maxCampaignsPerMonth: selectedPlan.maxCampaignsPerMonth !== undefined ? selectedPlan.maxCampaignsPerMonth : -1,
+        exportEnabled: selectedPlan.exportEnabled || false,
+        campaignsEnabled: selectedPlan.campaignsEnabled || false,
+      };
+      if (selectedPlan.price) salon.abonnement.montant = selectedPlan.price;
+    }
+
+    if (abonnement !== undefined && typeof abonnement === 'object') {
+      if (abonnement.statut !== undefined) salon.abonnement.statut = abonnement.statut;
+      if (abonnement.montant !== undefined) salon.abonnement.montant = Number(abonnement.montant);
+      if (abonnement.dureeJours !== undefined) salon.abonnement.dureeJours = Number(abonnement.dureeJours);
+      if (abonnement.dateDebut !== undefined) salon.abonnement.dateDebut = new Date(abonnement.dateDebut);
+      if (abonnement.dateFin !== undefined) salon.abonnement.dateFin = new Date(abonnement.dateFin);
+      if (abonnement.renouvellementAuto !== undefined) salon.abonnement.renouvellementAuto = Boolean(abonnement.renouvellementAuto);
+    }
+
+    await salon.save();
+
+    res.status(200).json({
+      success: true,
+      data: salon
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Delete a salon and associated records (Admin only)
+ * @route   DELETE /api/admin/salons/:id
+ * @access  Private/Admin
+ */
+exports.deleteSalon = async (req, res, next) => {
+  try {
+    const salon = await Salon.findByIdAndDelete(req.params.id);
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable' });
+    }
+
+    // Also delete staff users for this salon
+    await User.deleteMany({ salon: req.params.id });
+
+    res.status(200).json({ success: true, message: 'Salon supprimé avec succès' });
+  } catch (error) {
+    next(error);
+  }
+};
 /**
  * @desc    Create a new salon and its owner
  * @route   POST /api/admin/salons

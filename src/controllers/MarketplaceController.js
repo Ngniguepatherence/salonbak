@@ -6,6 +6,7 @@ const TypePrestation = require('../models/TypePrestation');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const SalonAnalyticsEvent = require('../models/SalonAnalyticsEvent');
+const Review = require('../models/Review');
 
 const { OAuth2Client } = require('google-auth-library');
 let redirectUriMarketplace = process.env.GOOGLE_REDIRECT_URI_MARKETPLACE || '';
@@ -323,12 +324,26 @@ exports.getSalons = async (req, res) => {
       .select('name slug address ville pays devise typeEtablissement logoUrl bannerUrl galleryUrls description phone email availability horaires location isHidden hidden branding businessType freelanceSettings bookingSettings rating reviewCount isSponsored createdAt')
       .sort({ createdAt: -1 });
 
+    const salonIds = salons.map(s => s._id);
+    const prestations = await TypePrestation.find({ salon: { $in: salonIds }, actif: { $ne: false } })
+      .select('nom name prix description categorie category salon duree');
+
+    const prestationsBySalon = {};
+    prestations.forEach(p => {
+      const sId = String(p.salon);
+      if (!prestationsBySalon[sId]) {
+        prestationsBySalon[sId] = [];
+      }
+      prestationsBySalon[sId].push(p);
+    });
+
     const data = salons.map(s => {
       const obj = s.toObject();
       if (!obj.slug) obj.slug = String(obj._id);
       if (!obj.bannerUrl && Array.isArray(obj.galleryUrls) && obj.galleryUrls.length > 0) {
         obj.bannerUrl = obj.galleryUrls[0];
       }
+      obj.prestations = prestationsBySalon[String(obj._id)] || [];
       return obj;
     });
 
@@ -1412,6 +1427,10 @@ exports.generateSitemapIndexXml = async (req, res) => {
     xml += `    <lastmod>${nowIso}</lastmod>\n`;
     xml += `  </sitemap>\n`;
     xml += `  <sitemap>\n`;
+    xml += `    <loc>${frontendUrl}/sitemap-blog.xml</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
+    xml += `  </sitemap>\n`;
+    xml += `  <sitemap>\n`;
     xml += `    <loc>${frontendUrl}/sitemap-pages.xml</loc>\n`;
     xml += `    <lastmod>${nowIso}</lastmod>\n`;
     xml += `  </sitemap>\n`;
@@ -1569,6 +1588,146 @@ exports.generateSitemapPagesXml = async (req, res) => {
   } catch (error) {
     console.error('Error generating sitemap pages XML:', error);
     res.status(500).send('Server Error');
+  }
+};
+
+// GET /sitemap-blog.xml (Beauty Blog & Local SEO Guides)
+exports.generateSitemapBlogXml = async (req, res) => {
+  try {
+    const frontendUrl = (process.env.FRONTEND_URL_MARKETPLACE || process.env.FRONTEND_URL || 'https://beautyflowafrica.com').replace(/\/+$/, '');
+    const nowIso = new Date().toISOString();
+
+    const blogArticles = [
+      { slug: 'prix-tresses-knotless-braids-bafoussam-douala-2026', lastmod: nowIso, priority: '0.90' },
+      { slug: 'guide-soin-entretien-locks-yaounde', lastmod: nowIso, priority: '0.90' },
+      { slug: 'meilleur-degrade-homme-barbier-cameroun', lastmod: nowIso, priority: '0.85' },
+      { slug: 'routine-soins-visage-anti-imperfections-tropical', lastmod: nowIso, priority: '0.85' },
+      { slug: 'top-salons-coiffure-bafoussam-reservation', lastmod: nowIso, priority: '0.90' },
+      { slug: 'manucure-pose-ongles-gel-capsules-douala', lastmod: nowIso, priority: '0.85' },
+    ];
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+
+    // Blog index
+    xml += `  <url>\n`;
+    xml += `    <loc>${frontendUrl}/blog</loc>\n`;
+    xml += `    <lastmod>${nowIso}</lastmod>\n`;
+    xml += `    <changefreq>daily</changefreq>\n`;
+    xml += `    <priority>0.85</priority>\n`;
+    xml += `  </url>\n`;
+
+    blogArticles.forEach(a => {
+      xml += `  <url>\n`;
+      xml += `    <loc>${frontendUrl}/blog/${a.slug}</loc>\n`;
+      xml += `    <lastmod>${a.lastmod}</lastmod>\n`;
+      xml += `    <changefreq>weekly</changefreq>\n`;
+      xml += `    <priority>${a.priority}</priority>\n`;
+      xml += `  </url>\n`;
+    });
+
+    xml += `</urlset>`;
+
+    res.setHeader('Content-Type', 'text/xml');
+    res.status(200).send(xml);
+  } catch (error) {
+    console.error('Error generating sitemap blog XML:', error);
+    res.status(500).send('Server Error');
+  }
+};
+
+// POST /api/marketplace/salons/:slug/reviews (Customer Review submission)
+exports.createSalonReview = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { rating, comment, authorName, serviceName, rendezvousId } = req.body;
+
+    if (!rating || Number(rating) < 1 || Number(rating) > 5) {
+      return res.status(400).json({ success: false, message: 'La note doit être comprise entre 1 et 5 étoiles.' });
+    }
+    if (!comment || !comment.trim()) {
+      return res.status(400).json({ success: false, message: 'Veuillez laisser un commentaire pour votre avis.' });
+    }
+    if (!authorName || !authorName.trim()) {
+      return res.status(400).json({ success: false, message: 'Veuillez renseigner votre nom.' });
+    }
+
+    const salon = await Salon.findOne({ slug: slug.toLowerCase() });
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable.' });
+    }
+
+    const review = await Review.create({
+      salon: salon._id,
+      rendezvous: rendezvousId || null,
+      appUser: req.appUser ? req.appUser._id : null,
+      authorName: authorName.trim(),
+      rating: Number(rating),
+      comment: comment.trim(),
+      serviceName: serviceName ? serviceName.trim() : undefined,
+      isVerified: true,
+    });
+
+    // Recalculate average rating & review count for the salon
+    const stats = await Review.aggregate([
+      { $match: { salon: salon._id } },
+      {
+        $group: {
+          _id: '$salon',
+          avgRating: { $avg: '$rating' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    if (stats.length > 0) {
+      salon.rating = Math.round(stats[0].avgRating * 10) / 10;
+      salon.reviewCount = stats[0].count;
+      if (!salon.branding) salon.branding = {};
+      salon.branding.rating = salon.rating;
+      await salon.save();
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Merci pour votre avis ! Il est maintenant publié.',
+      data: {
+        review,
+        salonRating: salon.rating,
+        salonReviewCount: salon.reviewCount
+      }
+    });
+  } catch (error) {
+    console.error('Error creating salon review:', error);
+    sendErrorResponse(res, error);
+  }
+};
+
+// GET /api/marketplace/salons/:slug/reviews (List customer reviews for salon)
+exports.getSalonReviews = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const salon = await Salon.findOne({ slug: slug.toLowerCase() }).select('_id rating reviewCount');
+    if (!salon) {
+      return res.status(404).json({ success: false, message: 'Salon introuvable.' });
+    }
+
+    const reviews = await Review.find({ salon: salon._id })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        rating: salon.rating || 5.0,
+        reviewCount: salon.reviewCount || reviews.length,
+        reviews
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching salon reviews:', error);
+    sendErrorResponse(res, error);
   }
 };
 
