@@ -48,13 +48,40 @@ function sanitizeBody(body, role) {
 exports.onboardSalon = async (req, res, next) => {
   try {
     let user = await User.findById(req.user._id);
-    if (!user || (user.role !== 'owner' && user.role !== 'co_owner')) {
-      return res.status(403).json({ success: false, message: 'Seul un propriétaire ou co-propriétaire peut créer un salon' });
+    if (!user) {
+      // Vérifier si l'utilisateur connecté provient du modèle AppUser
+      const AppUser = require('../models/AppUser');
+      const appUser = await AppUser.findById(req.user._id).select('+password');
+      if (appUser) {
+        user = await User.findOne({ email: appUser.email.toLowerCase().trim() });
+        if (!user) {
+          user = await User.create({
+            name: appUser.nom || 'Propriétaire',
+            email: appUser.email.toLowerCase().trim(),
+            password: appUser.password || 'TempPassword123!',
+            telephone: appUser.telephone || req.body.phone || '',
+            role: 'owner',
+            actif: true,
+          });
+        } else {
+          user.role = 'owner';
+          await user.save();
+        }
+      }
+    }
+
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Utilisateur introuvable. Veuillez vous reconnecter.' });
+    }
+
+    if (user.role !== 'owner' && user.role !== 'co_owner' && user.role !== 'admin') {
+      user.role = 'owner';
+      await user.save();
     }
 
     const {
       name, phone, email, address, ville, typeEtablissement, description, logoUrl, bannerUrl, galleryUrls, plan,
-      slogan, devise, pays, horaires, location, paymentConfig, affiliateCode
+      slogan, devise, pays, horaires, location, paymentConfig, affiliateCode, businessType, freelanceSettings, bookingSettings
     } = req.body;
 
     const salonName = name ? name.trim() : '';
@@ -81,6 +108,20 @@ exports.onboardSalon = async (req, res, next) => {
         if (slogan) existingSalon.slogan = slogan;
         if (devise) existingSalon.devise = devise;
         if (pays) existingSalon.pays = pays;
+        if (logoUrl) existingSalon.logoUrl = logoUrl;
+        if (bannerUrl) existingSalon.bannerUrl = bannerUrl;
+        if (galleryUrls && Array.isArray(galleryUrls)) existingSalon.galleryUrls = galleryUrls;
+        if (businessType) existingSalon.businessType = businessType;
+        if (freelanceSettings) existingSalon.freelanceSettings = freelanceSettings;
+        if (bookingSettings) existingSalon.bookingSettings = bookingSettings;
+
+        if (!existingSalon.branding) existingSalon.branding = {};
+        existingSalon.branding.hours = horaires || existingSalon.horaires;
+        existingSalon.branding.description = description || existingSalon.description;
+        existingSalon.branding.location = salonAddress;
+        if (logoUrl) existingSalon.branding.logoUrl = logoUrl;
+        if (bannerUrl) existingSalon.branding.bannerUrl = bannerUrl;
+
         await existingSalon.save();
 
         const { buildSessionResponse } = require('./AuthController');
@@ -113,20 +154,33 @@ exports.onboardSalon = async (req, res, next) => {
       address: salonAddress,
       ville: ville || '',
       typeEtablissement: typeEtablissement || 'salon_coiffure',
-      description,
-      logoUrl,
+      description: description || '',
+      logoUrl: logoUrl || '',
       bannerUrl: defaultBanner,
       galleryUrls: galleryUrls || [],
-      slogan,
+      slogan: slogan || '',
       devise: devise || 'FCFA',
       pays: pays || 'CM',
-      horaires,
-      location,
+      horaires: horaires || 'Lun - Sam : 08h00 - 19h00',
+      location: location || { lat: 4.0508, lng: 9.7085 },
       paymentConfig: paymentConfig || { payoutMomoNumber: '', payoutOperator: '' },
       owner: user._id,
       plan: plan || 'pro',
       affiliateCode: affiliateCode ? affiliateCode.trim().toUpperCase() : null,
       isActive: true,
+      rating: 0,
+      reviewCount: 0,
+      branding: {
+        rating: 0,
+        reviewCount: 0,
+        hours: horaires || 'Lun - Sam : 08h00 - 19h00',
+        description: description || '',
+        location: salonAddress,
+        logoUrl: logoUrl || '',
+        bannerUrl: defaultBanner,
+        businessType: businessType || 'salon',
+        freelanceSettings: freelanceSettings || null,
+      },
       limits: {
         maxCustomers: selectedPlan.maxCustomers !== undefined ? selectedPlan.maxCustomers : 300,
         maxStaff: selectedPlan.maxStaff !== undefined ? selectedPlan.maxStaff : 2,

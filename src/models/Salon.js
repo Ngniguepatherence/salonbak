@@ -211,6 +211,21 @@ const salonSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  rating: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 5,
+  },
+  reviewCount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  branding: {
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({ rating: 0, reviewCount: 0 })
+  },
   isActive: {
     type: Boolean,
     default: true,

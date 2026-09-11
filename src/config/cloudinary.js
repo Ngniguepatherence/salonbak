@@ -22,19 +22,19 @@ if (typeof multerStorageCloudinary === 'function') {
 
 // Configuration universelle des options de stockage selon la version du package
 const storageOptions = {
-  cloudinary: require('cloudinary'),
+  cloudinary: cloudinary,
 };
 
 if (typeof multerStorageCloudinary.CloudinaryStorage === 'function') {
   // Options pour la version 4.x (format imbriqué)
   storageOptions.params = {
     folder: 'beautyflow',
-    allowed_formats: ['jpg', 'png', 'jpeg', 'webp']
+    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif']
   };
 } else {
   // Options pour la version 2.x/3.x (format plat)
   storageOptions.folder = 'beautyflow';
-  storageOptions.allowedFormats = ['jpg', 'png', 'jpeg', 'webp'];
+  storageOptions.allowedFormats = ['jpg', 'png', 'jpeg', 'webp', 'gif'];
 }
 
 const storage = new CloudinaryStorage(storageOptions);
@@ -44,4 +44,20 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 } // Limite à 20 Mo max
 });
 
-module.exports = { cloudinary, upload };
+/**
+ * Upload direct d'une chaîne base64 ou d'une URL vers Cloudinary
+ */
+const uploadDirectBase64 = async (base64String, folder = 'beautyflow') => {
+  return new Promise((resolve, reject) => {
+    cloudinary.uploader.upload(
+      base64String,
+      { folder, resource_type: 'auto' },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result.secure_url || result.url);
+      }
+    );
+  });
+};
+
+module.exports = { cloudinary, upload, uploadDirectBase64 };

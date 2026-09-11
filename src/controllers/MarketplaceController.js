@@ -1640,7 +1640,8 @@ exports.generateSitemapBlogXml = async (req, res) => {
 exports.createSalonReview = async (req, res) => {
   try {
     const { slug } = req.params;
-    const { rating, comment, authorName, serviceName, rendezvousId } = req.body;
+    const { rating, comment, authorName, clientName, serviceName, rendezvousId } = req.body;
+    const effectiveAuthorName = (authorName || clientName || (req.appUser && req.appUser.nom) || '').trim();
 
     if (!rating || Number(rating) < 1 || Number(rating) > 5) {
       return res.status(400).json({ success: false, message: 'La note doit être comprise entre 1 et 5 étoiles.' });
@@ -1648,7 +1649,7 @@ exports.createSalonReview = async (req, res) => {
     if (!comment || !comment.trim()) {
       return res.status(400).json({ success: false, message: 'Veuillez laisser un commentaire pour votre avis.' });
     }
-    if (!authorName || !authorName.trim()) {
+    if (!effectiveAuthorName) {
       return res.status(400).json({ success: false, message: 'Veuillez renseigner votre nom.' });
     }
 
@@ -1661,7 +1662,7 @@ exports.createSalonReview = async (req, res) => {
       salon: salon._id,
       rendezvous: rendezvousId || null,
       appUser: req.appUser ? req.appUser._id : null,
-      authorName: authorName.trim(),
+      authorName: effectiveAuthorName,
       rating: Number(rating),
       comment: comment.trim(),
       serviceName: serviceName ? serviceName.trim() : undefined,
@@ -1717,11 +1718,14 @@ exports.getSalonReviews = async (req, res) => {
       .limit(50)
       .lean();
 
+    const effectiveRating = salon.rating !== undefined && salon.rating !== null ? Number(salon.rating) : (reviews.length > 0 ? Math.round((reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length) * 10) / 10 : 0);
+    const effectiveReviewCount = salon.reviewCount !== undefined && salon.reviewCount !== null ? Number(salon.reviewCount) : reviews.length;
+
     res.status(200).json({
       success: true,
       data: {
-        rating: salon.rating || 5.0,
-        reviewCount: salon.reviewCount || reviews.length,
+        rating: effectiveRating,
+        reviewCount: effectiveReviewCount,
         reviews
       }
     });

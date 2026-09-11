@@ -25,6 +25,11 @@ exports.protect = async (req, res, next) => {
     }
 
     if (!user) {
+      const AppUser = require('../models/AppUser');
+      user = await AppUser.findById(decoded.id);
+    }
+
+    if (!user) {
       return res.status(401).json({ success: false, message: 'Utilisateur introuvable' });
     }
 
@@ -32,7 +37,7 @@ exports.protect = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Compte désactivé' });
     }
 
-    if (user.salon) {
+    if (user.salon && typeof user.salon.checkSubscriptionTransition === 'function') {
       await user.salon.checkSubscriptionTransition();
     }
 

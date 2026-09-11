@@ -295,6 +295,14 @@ exports.createSalon = async (req, res, next) => {
       plan: plan || 'basic',
       affiliateCode: affiliateCode ? affiliateCode.trim().toUpperCase() : null,
       isActive: true,
+      rating: 0,
+      reviewCount: 0,
+      branding: {
+        rating: 0,
+        reviewCount: 0,
+        hours: 'Lun - Sam : 08h00 - 19h00',
+        location: salonAddress,
+      },
       limits: {
         maxCustomers: selectedPlan.maxCustomers !== undefined ? selectedPlan.maxCustomers : 300,
         maxStaff: selectedPlan.maxStaff !== undefined ? selectedPlan.maxStaff : 2,
