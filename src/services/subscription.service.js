@@ -233,10 +233,57 @@ class SubscriptionService {
         }
       }
 
+      // Synchroniser le statut des collaborateurs actifs selon les quotas du forfait
+      if (!isDowngrade && salon.limits?.maxStaff !== undefined) {
+        await this.syncStaffActiveStatus(salon._id, salon.limits.maxStaff);
+      }
+
       return salon;
     } catch (error) {
       console.error('Erreur lors de l\'activation de l\'abonnement:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Désactive automatiquement le surplus de collaborateurs actifs si la limite du plan est dépassée.
+   * Conserve 100% des données et des comptes sans rien supprimer.
+   * L'owner n'est jamais touché car son rôle est 'owner'.
+   */
+  async syncStaffActiveStatus(salonId, maxStaff) {
+    try {
+      if (maxStaff === undefined || maxStaff === null || Number(maxStaff) === -1) {
+        return { deactivatedCount: 0 };
+      }
+
+      const limit = Number(maxStaff);
+      if (limit < 0) return { deactivatedCount: 0 };
+
+      const User = require('../models/User');
+      const activeStaff = await User.find({
+        salon: salonId,
+        role: { $in: ['staff', 'co_owner'] },
+        actif: { $ne: false }
+      }).sort({ role: -1, createdAt: 1 });
+
+      if (activeStaff.length > limit) {
+        const staffToDeactivate = activeStaff.slice(limit);
+        const idsToDeactivate = staffToDeactivate.map(s => s._id);
+
+        if (idsToDeactivate.length > 0) {
+          await User.updateMany(
+            { _id: { $in: idsToDeactivate } },
+            { $set: { actif: false } }
+          );
+          console.log(`[STAFF LIMIT SYNC] Salon ${salonId}: ${idsToDeactivate.length} collaborateur(s) désactivé(s) automatiquement suite au quota de ${limit} (était: ${activeStaff.length} actifs).`);
+          return { deactivatedCount: idsToDeactivate.length, deactivatedIds: idsToDeactivate };
+        }
+      }
+
+      return { deactivatedCount: 0 };
+    } catch (error) {
+      console.error(`[STAFF LIMIT SYNC ERROR] Erreur pour le salon ${salonId}:`, error);
+      return { deactivatedCount: 0, error: error.message };
     }
   }
 }

@@ -102,6 +102,17 @@ exports.updateSalonStatus = async (req, res, next) => {
 
     await salon.save();
 
+    if (salon.limits?.maxStaff !== undefined) {
+      try {
+        const subscriptionService = require('../services/subscription.service');
+        if (subscriptionService && typeof subscriptionService.syncStaffActiveStatus === 'function') {
+          await subscriptionService.syncStaffActiveStatus(salon._id, salon.limits.maxStaff);
+        }
+      } catch (errSync) {
+        console.error('[ADMIN STAFF SYNC ERROR]', errSync);
+      }
+    }
+
     res.status(200).json({
       success: true,
       data: salon
@@ -207,6 +218,17 @@ exports.updateSalon = async (req, res, next) => {
     }
 
     await salon.save();
+
+    if (salon.limits?.maxStaff !== undefined) {
+      try {
+        const subscriptionService = require('../services/subscription.service');
+        if (subscriptionService && typeof subscriptionService.syncStaffActiveStatus === 'function') {
+          await subscriptionService.syncStaffActiveStatus(salon._id, salon.limits.maxStaff);
+        }
+      } catch (errSync) {
+        console.error('[ADMIN STAFF SYNC ERROR]', errSync);
+      }
+    }
 
     res.status(200).json({
       success: true,

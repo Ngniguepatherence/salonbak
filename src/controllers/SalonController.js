@@ -6,11 +6,12 @@ const User  = require('../models/User');
 // (tout ce qui n'est pas ici est bloqué)
 // ─────────────────────────────────────────────
 const OWNER_EDITABLE_FIELDS = [
-  'name', 'slogan', 'description', 'logoUrl', 'bannerUrl', 'galleryUrls', 'typeEtablissement',
-  'phone', 'email',
-  'address', 'ville', 'pays', 'devise', 'horaires', 'availability',
-  'joursRappelInactivite', 'joursRappelSuivi','configFidelite', 'location', 'paymentConfig',
-  'isHidden', 'hidden'
+  'name', 'nom', 'slogan', 'description', 'logoUrl', 'bannerUrl', 'galleryUrls', 'typeEtablissement',
+  'phone', 'telephone', 'whatsappNumber', 'email',
+  'address', 'adresse', 'ville', 'pays', 'devise', 'horaires', 'availability', 'disponibilite',
+  'joursRappelInactivite', 'joursRappelSuivi', 'configFidelite', 'fideliteActive', 'programmeFidelite',
+  'location', 'paymentConfig',
+  'isHidden', 'hidden', 'slug', 'branding', 'bookingSettings'
 ];
 
 // Champs que seul l'admin peut toucher
@@ -37,6 +38,11 @@ function sanitizeBody(body, role) {
       if (body[field] !== undefined) cleaned[field] = body[field];
     });
   }
+
+  // Mapper les alias français vers les champs officiels si nécessaire
+  if (cleaned.nom && !cleaned.name) cleaned.name = cleaned.nom;
+  if (cleaned.telephone && !cleaned.phone) cleaned.phone = cleaned.telephone;
+  if (cleaned.adresse && !cleaned.address) cleaned.address = cleaned.adresse;
 
   return cleaned;
 }
@@ -389,6 +395,18 @@ exports.getAbonnement = async (req, res, next) => {
 
 exports.getStaff = async (req, res, next) => {
   try {
+    const salon = await Salon.findById(req.params.salonId);
+    if (salon && salon.limits?.maxStaff !== undefined) {
+      try {
+        const subscriptionService = require('../services/subscription.service');
+        if (subscriptionService && typeof subscriptionService.syncStaffActiveStatus === 'function') {
+          await subscriptionService.syncStaffActiveStatus(salon._id, salon.limits.maxStaff);
+        }
+      } catch (syncErr) {
+        console.error('[GET STAFF SYNC ERROR]', syncErr);
+      }
+    }
+
     const staff = await User
       .find({ salon: req.params.salonId, role: { $in: ['staff', 'co_owner'] } })
       .select('-password');
@@ -401,10 +419,30 @@ exports.getStaff = async (req, res, next) => {
 
 exports.createStaff = async (req, res, next) => {
   try {
-    const { name, email, password, telephone, role } = req.body;
+    const { name, email, password, telephone, role, actif } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, message: 'name, email et password requis' });
+    }
+
+    const salon = await Salon.findById(req.params.salonId);
+    const maxStaff = salon?.limits?.maxStaff ?? -1;
+    const isActif = actif !== undefined ? Boolean(actif) : true;
+
+    if (maxStaff !== -1 && isActif) {
+      const activeCount = await User.countDocuments({
+        salon: req.params.salonId,
+        role: { $in: ['staff', 'co_owner'] },
+        actif: { $ne: false },
+      });
+
+      if (activeCount >= maxStaff) {
+        return res.status(400).json({
+          success: false,
+          message: `Limite de collaborateurs actifs atteinte (${activeCount}/${maxStaff}) pour votre forfait. Vous pouvez l'ajouter en mode inactif ou passer à un forfait supérieur.`,
+          limitReached: true,
+        });
+      }
     }
 
     const assignedRole = role === 'co_owner' ? 'co_owner' : 'staff';
@@ -416,6 +454,7 @@ exports.createStaff = async (req, res, next) => {
       telephone,
       role: assignedRole,
       salon: req.params.salonId,
+      actif: isActif,
     });
 
     res.status(201).json({
@@ -451,6 +490,32 @@ exports.updateStaff = async (req, res, next) => {
     }
     if (req.body.password !== undefined && req.body.password !== '') {
       staff.password = req.body.password; // Ce sera hashé par le hook pre('save') !
+    }
+
+    if (req.body.actif !== undefined) {
+      const isActivating = Boolean(req.body.actif);
+      if (isActivating && staff.actif === false) {
+        // Vérifier si l'activation dépasse le quota maxStaff
+        const salon = await Salon.findById(req.params.salonId);
+        const maxStaff = salon?.limits?.maxStaff ?? -1;
+        if (maxStaff !== -1) {
+          const activeCount = await User.countDocuments({
+            salon: req.params.salonId,
+            role: { $in: ['staff', 'co_owner'] },
+            actif: { $ne: false },
+            _id: { $ne: staff._id }
+          });
+
+          if (activeCount + 1 > maxStaff) {
+            return res.status(400).json({
+              success: false,
+              message: `Limite de collaborateurs actifs atteinte (${activeCount}/${maxStaff}). Veuillez désactiver un autre membre ou passer au forfait supérieur.`,
+              limitReached: true
+            });
+          }
+        }
+      }
+      staff.actif = isActivating;
     }
 
     await staff.save();

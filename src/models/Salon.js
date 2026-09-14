@@ -45,6 +45,10 @@ const abonnementSchema = new mongoose.Schema({
 
 
 const configFideliteSchema = new mongoose.Schema({
+  actif: {
+    type: Boolean,
+    default: true,
+  },
   visitesRequises: {
     type: Number,
     default: 10,
@@ -120,6 +124,11 @@ const salonSchema = new mongoose.Schema({
     trim: true,
     maxlength: [20, 'Le numéro ne peut pas dépasser 20 caractères'],
   },
+  whatsappNumber: {
+    type: String,
+    trim: true,
+    maxlength: [20, 'Le numéro WhatsApp ne peut pas dépasser 20 caractères'],
+  },
   email: {
     type: String,
     required: [true, 'Veuillez fournir un email'],
@@ -127,6 +136,14 @@ const salonSchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
     match: [/^\S+@\S+\.\S+$/, 'Veuillez fournir un email valide'],
+  },
+  fideliteActive: {
+    type: Boolean,
+    default: true,
+  },
+  programmeFidelite: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
   },
 
   // ── Localisation ──────────────────────────
@@ -166,6 +183,22 @@ const salonSchema = new mongoose.Schema({
   availability: {
     type: mongoose.Schema.Types.Mixed,
     default: null
+  },
+  disponibilite: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  bookingSettings: {
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({
+      autoConfirm: true,
+      allowGuest: true,
+      openingHour: 8,
+      closingHour: 20,
+      slotDurationMin: 30,
+      minBookingNoticeMin: 90,
+      customDates: {}
+    })
   },
 
   // ── Rappels & SAV ─────────────────────────
@@ -365,6 +398,17 @@ salonSchema.methods.checkSubscriptionTransition = async function () {
     };
 
     await this.save();
+
+    // Désactiver automatiquement le surplus de staff selon les quotas du nouveau plan
+    try {
+      const subscriptionService = require('../services/subscription.service');
+      if (subscriptionService && typeof subscriptionService.syncStaffActiveStatus === 'function') {
+        await subscriptionService.syncStaffActiveStatus(this._id, this.limits.maxStaff);
+      }
+    } catch (staffSyncErr) {
+      console.error('[TRANSITION STAFF SYNC ERROR]', staffSyncErr);
+    }
+
     return true; // Transition effectuée
   }
   return false;
